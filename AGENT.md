@@ -7,12 +7,12 @@ Use `demo-video-recorder` when the user asks for an automated demo video of a pr
 1. Inspect the project first. Identify the smallest workflow that proves the app works.
 2. Create a short recording script, usually `record_demo.py`, that imports the recorder.
 3. Prefer `CLIDemoRecorder` for terminal apps and `DemoVideoRecorder` for GUI or browser windows.
-4. Record to `out/<project>-demo.mp4`; keep generated output out of source control.
+4. Record to `out/<project>-demo.mp4`, or the required location by user; if unspecified, keep generated output out of source control.
 5. Follow the user's prompt first for speed, pauses, tone, and coverage. If they do not specify speed, use `DEFAULTS` from the library.
 6. Follow the user's requested tone when given. Otherwise use a human live-demo style: natural, somewhat casual or lightly humorous, but still accurate and comprehensive.
 7. Use `show_explanation()` before or after each visible action so the final video has useful burned subtitles.
-8. Run the script yourself. Fix timing, app startup, and input issues until the demo completes. You must check that the actual video output is not blank and has subtitles.
-9. For CLI apps, explore with `--no-record` first when useful, then record once the interaction is stable.
+8. Run the script yourself. First run a fast smoke test, fix timing, app startup, and input issues until the demo completes. You must check breaking and unintended exceptions or errors during recording, and if the actual video output is not blank and has subtitles.
+9. Record the final production demo once the interaction is stable.
 10. Stop and tell the user when a global dependency is missing, especially `ffmpeg` or `ffprobe`.
 
 ## Defaults
