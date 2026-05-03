@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import time
 
+from demo_video_recorder.defaults import DEFAULTS
 from demo_video_recorder.errors import DependencyMissingError, RecordingError
 from demo_video_recorder.types import CaptureRegion
 
@@ -19,8 +20,8 @@ class FfmpegCaptureBackend:
         self,
         raw_video_path: str | Path,
         *,
-        framerate: int = 15,
-        scale_width: int | None = 1280,
+        framerate: int = DEFAULTS.capture_framerate,
+        scale_width: int | None = DEFAULTS.video_scale_width,
         ffmpeg: str = "ffmpeg",
         ffprobe: str = "ffprobe",
         draw_mouse: bool = False,

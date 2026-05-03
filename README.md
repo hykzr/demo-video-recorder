@@ -1,6 +1,6 @@
 # demo-video-recorder
 
-Scriptable demo video recording for Python agents and humans. The package separates reusable recording primitives from project-specific demo steps, so an agent can inspect a project, write a small `record_demo.py`, and produce an MP4 with burned subtitles.
+Scriptable demo video recording for Python agents and humans. The package separates reusable recording primitives from project-specific demo steps, so an agent can inspect a project, write a small `record_demo.py`, react to CLI output, and produce an MP4 with burned subtitles.
 
 The current backend targets Windows first and uses the installed `ffmpeg` and `ffprobe` executables for screen capture, encoding, probing, and subtitle burn-in. The Python API is structured so macOS and Linux capture backends can be added later.
 
@@ -26,6 +26,24 @@ uv run python record.py --new-window
 ```
 
 The example app lives in `examples/guessing_game.py`; the recording script is `examples/record_guessing_game.py`.
+The example intentionally uses a random secret number, so the recorder reads the app output and chooses guesses from the hints instead of replaying fixed inputs.
+
+## Defaults
+
+The built-in defaults mirror the original PowerShell script:
+
+```python
+from demo_video_recorder import DEFAULTS
+
+DEFAULTS.words_per_minute          # 170
+DEFAULTS.min_pause_seconds         # 2.0
+DEFAULTS.command_lead_seconds      # 0.0
+DEFAULTS.typed_character_delay     # 0.018
+DEFAULTS.capture_framerate         # 15
+DEFAULTS.video_scale_width         # 1280
+```
+
+Use `FAST_SMOKE_TEST_DEFAULTS` for quick local script checks, not polished final videos.
 
 ## CLI Demo API
 
@@ -39,8 +57,10 @@ def main():
         r.open_terminal(title="Demo", top=True, start_recording=True)
         r.show_explanation("Today we'll demo the main workflow.")
         r.run(["python", "app.py"], interactive=True, command_label="python app.py")
-        r.wait_for_output(">")
+        r.expect_output(">")
+        marker = r.mark_output()
         r.input("help")
+        r.expect_regex(r"Commands?:", since=marker)
         r.show_explanation("The app responds to typed input while subtitles explain the action.")
         r.input("quit")
         r.stop_app()
@@ -55,9 +75,14 @@ Useful methods:
 - `open_terminal(...)`: configures the terminal and can start recording immediately.
 - `run(..., interactive=True)`: starts a CLI app and streams stdout/stderr to the recorded terminal.
 - `input("text")`: types into the active CLI app with a configurable typing delay.
-- `wait_for_output("text")`: waits until expected app output appears.
+- `expect_output("text")`: waits until expected app output appears.
+- `expect_regex(r"...")`: waits for a regex match and returns the match object.
+- `mark_output()` / `output_since(marker)`: isolate output caused by one action.
+- `output_text("stdout")` and `output_text("stderr")`: inspect streams separately.
 - `show_explanation("...")`: adds narration subtitles and waits long enough to read them.
 - `stop_recording()`: stops capture, trims subtitles to video duration, and burns subtitles into the final MP4.
+
+When `new_window=True` is used, worker stdout and stderr are also mirrored to `out/<name>.worker.log`. If the worker fails, the parent process prints the log tail so the recording script is easier to debug.
 
 ## GUI or App Window API
 

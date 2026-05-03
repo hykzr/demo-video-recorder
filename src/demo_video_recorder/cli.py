@@ -5,19 +5,39 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 import os
+import re
 import subprocess
 import sys
 import threading
 import time
-from typing import Mapping, Sequence
+from typing import Literal, Mapping, Pattern, Sequence
 
 from demo_video_recorder.core import Command, DemoVideoRecorder
+from demo_video_recorder.defaults import DEFAULTS
 from demo_video_recorder.errors import ProcessError, RecordingError
 from demo_video_recorder import windowing
 
 
 _WORKER_ENV = "DEMO_VIDEO_RECORDER_TERMINAL_WORKER"
 _WORKER_LOG_ENV = "DEMO_VIDEO_RECORDER_WORKER_LOG"
+OutputStream = Literal["combined", "stdout", "stderr"]
+
+
+@dataclass(frozen=True)
+class OutputMarker:
+    combined: int
+    stdout: int
+    stderr: int
+
+    def position(self, stream_name: OutputStream) -> int:
+        if stream_name == "stdout":
+            return self.stdout
+        if stream_name == "stderr":
+            return self.stderr
+        return self.combined
+
+
+OutputMarkerLike = int | OutputMarker
 
 
 class _Tee:
@@ -38,17 +58,31 @@ class _Tee:
 @dataclass
 class _ManagedCLIProcess:
     process: subprocess.Popen[str]
-    output: list[str] = field(default_factory=list)
+    combined_output: list[str] = field(default_factory=list)
+    stdout_output: list[str] = field(default_factory=list)
+    stderr_output: list[str] = field(default_factory=list)
     lock: threading.Lock = field(default_factory=threading.Lock)
-    reader: threading.Thread | None = None
+    stdout_reader: threading.Thread | None = None
+    stderr_reader: threading.Thread | None = None
 
-    def append(self, text: str) -> None:
+    def append(self, stream_name: OutputStream, text: str) -> None:
         with self.lock:
-            self.output.append(text)
+            self.combined_output.append(text)
+            if stream_name == "stdout":
+                self.stdout_output.append(text)
+            elif stream_name == "stderr":
+                self.stderr_output.append(text)
 
-    def text(self) -> str:
+    def text(self, stream_name: OutputStream = "combined") -> str:
         with self.lock:
-            return "".join(self.output)
+            if stream_name == "stdout":
+                return "".join(self.stdout_output)
+            if stream_name == "stderr":
+                return "".join(self.stderr_output)
+            return "".join(self.combined_output)
+
+    def length(self, stream_name: OutputStream = "combined") -> int:
+        return len(self.text(stream_name))
 
 
 class CLIDemoRecorder(DemoVideoRecorder):
@@ -58,16 +92,17 @@ class CLIDemoRecorder(DemoVideoRecorder):
         self,
         output_path: str | Path,
         *,
-        typed_character_delay: float = 0.018,
-        command_lead_seconds: float = 0.0,
+        typed_character_delay: float = DEFAULTS.typed_character_delay,
+        command_lead_seconds: float = DEFAULTS.command_lead_seconds,
         prompt: str = "> ",
         **kwargs: object,
     ) -> None:
-        super().__init__(output_path, **kwargs)
+        super().__init__(output_path, **kwargs) # type: ignore
         self.typed_character_delay = typed_character_delay
         self.command_lead_seconds = command_lead_seconds
         self.prompt = prompt
         self.active_process: _ManagedCLIProcess | None = None
+        self.last_process: _ManagedCLIProcess | None = None
 
     def open_terminal(
         self,
@@ -143,29 +178,37 @@ class CLIDemoRecorder(DemoVideoRecorder):
             shell=isinstance(command, str) if shell is None else shell,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
             errors="replace",
             bufsize=0,
         )
         managed = _ManagedCLIProcess(process)
-        managed.reader = threading.Thread(
+        managed.stdout_reader = threading.Thread(
             target=self._stream_process_output,
-            args=(managed,),
+            args=(managed, "stdout"),
             daemon=True,
         )
-        managed.reader.start()
+        managed.stderr_reader = threading.Thread(
+            target=self._stream_process_output,
+            args=(managed, "stderr"),
+            daemon=True,
+        )
+        managed.stdout_reader.start()
+        managed.stderr_reader.start()
+        self.last_process = managed
 
         if interactive:
             self.active_process = managed
             return process
 
         return_code = process.wait(timeout=timeout)
-        if managed.reader is not None:
-            managed.reader.join(timeout=2)
+        self._join_readers(managed)
         if check and return_code != 0:
-            raise ProcessError(f"Command exited with code {return_code}: {label}")
+            output = managed.text("combined").strip()
+            detail = f"\n\nOutput:\n{output}" if output else ""
+            raise ProcessError(f"Command exited with code {return_code}: {label}{detail}")
         return return_code
 
     def input(
@@ -201,18 +244,126 @@ class CLIDemoRecorder(DemoVideoRecorder):
             time.sleep(wait_after)
         return self
 
-    def wait_for_output(self, text: str, *, timeout_seconds: float = 10.0) -> "CLIDemoRecorder":
-        managed = self._require_active_process()
+    def output_text(self, stream: OutputStream = "combined") -> str:
+        """Return captured output from the active or most recent CLI process."""
+
+        return self._require_known_process().text(stream)
+
+    def mark_output(self, stream: OutputStream = "combined") -> OutputMarker:
+        """Return a checkpoint for later ``output_since()`` calls."""
+
+        managed = self._require_known_process()
+        return OutputMarker(
+            combined=managed.length("combined"),
+            stdout=managed.length("stdout"),
+            stderr=managed.length("stderr"),
+        )
+
+    def output_since(self, marker: OutputMarkerLike, stream: OutputStream = "combined") -> str:
+        """Return captured output after a checkpoint."""
+
+        return self.output_text(stream)[self._marker_position(marker, stream) :]
+
+    def check_output(
+        self,
+        text: str,
+        *,
+        stream: OutputStream = "combined",
+        since: OutputMarkerLike = 0,
+    ) -> bool:
+        """Check whether captured output contains text."""
+
+        managed = self._require_known_process()
+        return any(text in candidate for candidate in self._output_candidates(managed, stream, since))
+
+    def wait_for_output(
+        self,
+        text: str,
+        *,
+        timeout_seconds: float = 10.0,
+        stream: OutputStream = "combined",
+        since: OutputMarkerLike = 0,
+    ) -> "CLIDemoRecorder":
+        """Wait until captured stdout/stderr contains text."""
+
+        managed = self._require_known_process()
         deadline = time.monotonic() + timeout_seconds
 
         while time.monotonic() < deadline:
-            if text in managed.text():
+            if any(text in candidate for candidate in self._output_candidates(managed, stream, since)):
                 return self
-            if managed.process.poll() is not None and text in managed.text():
+            if managed.process.poll() is not None and any(
+                text in candidate for candidate in self._output_candidates(managed, stream, since)
+            ):
                 return self
             time.sleep(0.05)
 
-        raise ProcessError(f"Timed out waiting for CLI output: {text!r}")
+        captured = self.output_since(since, stream).strip()
+        detail = f"\n\nCaptured {stream} output:\n{captured}" if captured else ""
+        raise ProcessError(f"Timed out waiting for CLI output: {text!r}{detail}")
+
+    def expect_output(
+        self,
+        text: str,
+        *,
+        timeout_seconds: float = 10.0,
+        stream: OutputStream = "combined",
+        since: OutputMarkerLike = 0,
+    ) -> str:
+        """Wait for text and return the matching output window."""
+
+        self.wait_for_output(text, timeout_seconds=timeout_seconds, stream=stream, since=since)
+        return self.output_since(since, stream)
+
+    def wait_for_regex(
+        self,
+        pattern: str | Pattern[str],
+        *,
+        timeout_seconds: float = 10.0,
+        stream: OutputStream = "combined",
+        since: OutputMarkerLike = 0,
+        flags: int = 0,
+    ) -> re.Match[str]:
+        """Wait until captured output matches a regular expression."""
+
+        managed = self._require_known_process()
+        compiled = re.compile(pattern, flags) if isinstance(pattern, str) else pattern
+        deadline = time.monotonic() + timeout_seconds
+
+        while time.monotonic() < deadline:
+            for text in self._output_candidates(managed, stream, since):
+                match = compiled.search(text)
+                if match is not None:
+                    return match
+            if managed.process.poll() is not None:
+                for text in self._output_candidates(managed, stream, since):
+                    match = compiled.search(text)
+                    if match is not None:
+                        return match
+            time.sleep(0.05)
+
+        captured = self.output_since(since, stream).strip()
+        detail = f"\n\nCaptured {stream} output:\n{captured}" if captured else ""
+        raise ProcessError(f"Timed out waiting for CLI regex: {compiled.pattern!r}{detail}")
+
+    def expect_regex(
+        self,
+        pattern: str | Pattern[str],
+        *,
+        timeout_seconds: float = 10.0,
+        stream: OutputStream = "combined",
+        since: OutputMarkerLike = 0,
+        flags: int = 0,
+    ) -> re.Match[str]:
+        """Alias for ``wait_for_regex()`` that reads well in demo scripts."""
+
+        return self.wait_for_regex(
+            pattern,
+            timeout_seconds=timeout_seconds,
+            stream=stream,
+            since=since,
+            flags=flags,
+        )
 
     def stop_app(self, *, timeout_seconds: float = 5.0) -> int | None:
         if self.active_process is None:
@@ -220,6 +371,7 @@ class CLIDemoRecorder(DemoVideoRecorder):
 
         managed = self.active_process
         self.active_process = None
+        self.last_process = managed
         process = managed.process
 
         if process.stdin is not None and process.poll() is None:
@@ -239,8 +391,7 @@ class CLIDemoRecorder(DemoVideoRecorder):
                     process.kill()
                     raise RecordingError("The CLI app did not stop cleanly.")
 
-        if managed.reader is not None:
-            managed.reader.join(timeout=2)
+        self._join_readers(managed)
         return process.returncode
 
     def close(self) -> None:
@@ -270,7 +421,10 @@ class CLIDemoRecorder(DemoVideoRecorder):
         process = subprocess.Popen(args, cwd=os.getcwd(), env=env, creationflags=creationflags)
         if not wait:
             return 0
-        return process.wait()
+        return_code = process.wait()
+        if return_code != 0:
+            self._print_worker_log_tail(Path(env[_WORKER_LOG_ENV]))
+        return return_code
 
     def _type_line(self, text: str, *, prefix: str = "") -> None:
         sys.stdout.write("\n")
@@ -284,8 +438,12 @@ class CLIDemoRecorder(DemoVideoRecorder):
         sys.stdout.write("\n")
         sys.stdout.flush()
 
-    def _stream_process_output(self, managed: _ManagedCLIProcess) -> None:
-        stream = managed.process.stdout
+    def _stream_process_output(
+        self,
+        managed: _ManagedCLIProcess,
+        stream_name: OutputStream,
+    ) -> None:
+        stream = managed.process.stdout if stream_name == "stdout" else managed.process.stderr
         if stream is None:
             return
 
@@ -293,14 +451,47 @@ class CLIDemoRecorder(DemoVideoRecorder):
             chunk = stream.read(1)
             if chunk == "":
                 break
-            managed.append(chunk)
-            sys.stdout.write(chunk)
-            sys.stdout.flush()
+            managed.append(stream_name, chunk)
+            output_stream = sys.stdout if stream_name == "stdout" else sys.stderr
+            output_stream.write(chunk)
+            output_stream.flush()
 
     def _require_active_process(self) -> _ManagedCLIProcess:
         if self.active_process is None:
             raise ProcessError("No active CLI app. Start one with run(..., interactive=True).")
         return self.active_process
+
+    def _require_known_process(self) -> _ManagedCLIProcess:
+        if self.active_process is not None:
+            return self.active_process
+        if self.last_process is not None:
+            return self.last_process
+        raise ProcessError("No CLI process has been started yet.")
+
+    def _join_readers(self, managed: _ManagedCLIProcess) -> None:
+        for reader in (managed.stdout_reader, managed.stderr_reader):
+            if reader is not None:
+                reader.join(timeout=2)
+
+    def _marker_position(self, marker: OutputMarkerLike, stream: OutputStream) -> int:
+        if isinstance(marker, OutputMarker):
+            return marker.position(stream)
+        return marker
+
+    def _output_candidates(
+        self,
+        managed: _ManagedCLIProcess,
+        stream: OutputStream,
+        marker: OutputMarkerLike,
+    ) -> list[str]:
+        if stream != "combined":
+            return [managed.text(stream)[self._marker_position(marker, stream) :]]
+
+        return [
+            managed.text("combined")[self._marker_position(marker, "combined") :],
+            managed.text("stdout")[self._marker_position(marker, "stdout") :],
+            managed.text("stderr")[self._marker_position(marker, "stderr") :],
+        ]
 
     def _command_to_label(self, command: Command) -> str:
         if isinstance(command, str):
@@ -316,3 +507,13 @@ class CLIDemoRecorder(DemoVideoRecorder):
         log_file = Path(log_path).open("a", encoding="utf-8", buffering=1)
         sys.stdout = _Tee(sys.stdout, log_file)  # type: ignore[assignment]
         sys.stderr = _Tee(sys.stderr, log_file)  # type: ignore[assignment]
+
+    def _print_worker_log_tail(self, log_path: Path, *, max_chars: int = 12_000) -> None:
+        if not log_path.exists():
+            return
+
+        text = log_path.read_text(encoding="utf-8", errors="replace")
+        if len(text) > max_chars:
+            text = text[-max_chars:]
+        sys.stderr.write(f"\nRecording worker failed. Log tail from {log_path}:\n{text}\n")
+        sys.stderr.flush()

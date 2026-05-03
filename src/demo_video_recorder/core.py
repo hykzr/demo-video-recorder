@@ -9,6 +9,7 @@ import time
 from typing import Mapping, Sequence
 
 from demo_video_recorder.backends import FfmpegCaptureBackend
+from demo_video_recorder.defaults import DEFAULTS
 from demo_video_recorder.subtitles import SubtitleWriter
 from demo_video_recorder.types import CaptureRegion, WindowInfo
 from demo_video_recorder import windowing
@@ -30,11 +31,11 @@ class DemoVideoRecorder:
         *,
         raw_video_path: str | Path | None = None,
         subtitle_path: str | Path | None = None,
-        words_per_minute: int = 170,
-        min_pause_seconds: float = 2.0,
+        words_per_minute: int = DEFAULTS.words_per_minute,
+        min_pause_seconds: float = DEFAULTS.min_pause_seconds,
         manual_pause: bool = False,
-        capture_framerate: int = 15,
-        video_scale_width: int | None = 1280,
+        capture_framerate: int = DEFAULTS.capture_framerate,
+        video_scale_width: int | None = DEFAULTS.video_scale_width,
         burn_subtitles: bool = True,
         keep_raw: bool = False,
         ffmpeg: str = "ffmpeg",
@@ -70,7 +71,7 @@ class DemoVideoRecorder:
         )
         self.capture_window: WindowInfo | None = None
         self.capture_region: CaptureRegion | None = None
-        self.opened_processes: list[subprocess.Popen[object]] = []
+        self.opened_processes: list[subprocess.Popen[bytes]] = []
 
     @property
     def is_recording(self) -> bool:
@@ -87,7 +88,7 @@ class DemoVideoRecorder:
         activate: bool = True,
         capture_window: bool = False,
         shell: bool | None = None,
-    ) -> subprocess.Popen[object]:
+    ) -> subprocess.Popen[bytes]:
         """Open an application and optionally select its window for capture."""
 
         process = subprocess.Popen(

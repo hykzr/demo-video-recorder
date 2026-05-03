@@ -8,6 +8,8 @@ from pathlib import Path
 import re
 import time
 
+from demo_video_recorder.defaults import DEFAULTS
+
 
 _TIMING_RE = re.compile(
     r"^(?P<start>\d{2,}:\d{2}:\d{2},\d{3}) --> "
@@ -63,8 +65,8 @@ class SubtitleWriter:
         self,
         path: str | Path,
         *,
-        words_per_minute: int = 170,
-        min_pause_seconds: float = 2.0,
+        words_per_minute: int = DEFAULTS.words_per_minute,
+        min_pause_seconds: float = DEFAULTS.min_pause_seconds,
         manual_pause: bool = False,
     ) -> None:
         self.path = Path(path)

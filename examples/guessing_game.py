@@ -1,13 +1,19 @@
-"""A tiny deterministic CLI app for demo recording."""
+"""A tiny random CLI app for demo recording."""
 
 from __future__ import annotations
 
+import secrets
+
+
+LOWER_BOUND = 1
+UPPER_BOUND = 10
+
 
 def main() -> None:
-    secret = 7
+    secret = secrets.randbelow(UPPER_BOUND - LOWER_BOUND + 1) + LOWER_BOUND
     attempts = 0
     print("Number Guessing Game")
-    print("I picked a number between 1 and 10.")
+    print(f"I picked a number between {LOWER_BOUND} and {UPPER_BOUND}.")
 
     while True:
         raw_guess = input("Guess> ").strip()
