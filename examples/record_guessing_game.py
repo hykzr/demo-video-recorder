@@ -87,6 +87,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Keep the generated per-line TTS clips and mixed narration track.",
     )
     parser.add_argument(
+        "--list-speakers",
+        action="store_true",
+        help="Print available Edge TTS speakers and exit.",
+    )
+    parser.add_argument(
         "--check-access",
         action=argparse.BooleanOptionalAction,
         default=sys.platform == "darwin",
@@ -195,6 +200,16 @@ def main(argv: list[str] | None = None) -> int:
         if tts_enabled
         else None
     )
+    if args.list_speakers:
+        speaker_backend = tts_backend or EdgeTTSBackend(
+            save_dir=tts_save_dir,
+            speaker=args.tts_speaker,
+            speed=args.tts_speed,
+            volume=args.tts_volume,
+        )
+        for speaker in speaker_backend.list_speakers():
+            print(speaker)
+        return 0
 
     recorder = CLIDemoRecorder(
         output_path,

@@ -14,7 +14,12 @@ from demo_video_recorder.macos import (
     ScreenRecordingAccessResult,
     check_screen_recording_access,
 )
-from demo_video_recorder.tts import EdgeTTSBackend, NarrationClip, SynthesizedAudio
+from demo_video_recorder.tts import (
+    EdgeTTSBackend,
+    NarrationClip,
+    SynthesizedAudio,
+    TTSBackend,
+)
 from demo_video_recorder.types import CaptureRegion, WindowInfo
 
 __all__ = [
@@ -34,6 +39,7 @@ __all__ = [
     "RecordingError",
     "ScreenRecordingAccessResult",
     "SynthesizedAudio",
+    "TTSBackend",
     "WindowInfo",
     "WindowNotFoundError",
 ]

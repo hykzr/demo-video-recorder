@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from importlib import import_module
 from pathlib import Path
 import asyncio
 import shutil
 import subprocess
-from typing import Protocol
 
 from demo_video_recorder.errors import DependencyMissingError, RecordingError
 
@@ -31,83 +31,50 @@ class NarrationClip:
     duration_seconds: float
 
 
-class TTSBackend(Protocol):
-    """Interface used by the recorder to synthesize narration clips."""
+class TTSBackend(ABC):
+    """Common base class for narration synthesis backends."""
 
-    save_dir: Path
+    def __init__(self, *, save_dir: str | Path, ffprobe: str = "ffprobe") -> None:
+        self.save_dir = Path(save_dir)
+        self.ffprobe = ffprobe
 
     def synthesize(self, text: str) -> SynthesizedAudio:
         """Create audio for ``text`` and return its path and duration."""
-        return SynthesizedAudio(path=Path(), duration_seconds=0)
-
-    def cleanup(self) -> None:
-        """Remove intermediate clip artifacts when they are no longer needed."""
-
-
-class EdgeTTSBackend:
-    """Generate narration clips with the optional ``edge-tts`` package."""
-
-    def __init__(
-        self,
-        *,
-        save_dir: str | Path,
-        speaker: str = "en-US-AvaNeural",
-        speed: str = "+0%",
-        volume: str = "+0%",
-        ffprobe: str = "ffprobe",
-    ) -> None:
-        self.save_dir = Path(save_dir)
-        self.speaker = speaker
-        self.speed = speed
-        self.volume = volume
-        self.ffprobe = ffprobe
-        self._index = 1
-
-    def synthesize(self, text: str) -> SynthesizedAudio:
-        """Render ``text`` to a new MP3 file and measure the real duration."""
 
         trimmed = text.strip()
         if not trimmed:
             raise RecordingError("Cannot synthesize empty narration text.")
 
-        self._ensure_available()
+        if shutil.which(self.ffprobe) is None:
+            raise DependencyMissingError(
+                f"Missing external dependency: {self.ffprobe}"
+            )
+
         self.save_dir.mkdir(parents=True, exist_ok=True)
-        output_path = self.save_dir / f"clip-{self._index:04}.mp3"
-        self._index += 1
-
-        edge_tts = import_module("edge_tts")
-        communicate = edge_tts.Communicate(
-            trimmed,
-            self.speaker,
-            rate=self.speed,
-            volume=self.volume,
-        )
-        save_sync = getattr(communicate, "save_sync", None)
-        if callable(save_sync):
-            save_sync(str(output_path))
-        else:
-            asyncio.run(communicate.save(str(output_path)))
-
+        output_path = self.save_audio(trimmed)
         return SynthesizedAudio(
             path=output_path,
             duration_seconds=self._probe_duration_seconds(output_path),
         )
 
     def cleanup(self) -> None:
-        """Remove generated per-cue clips."""
+        """Remove intermediate clip artifacts when they are no longer needed."""
 
         shutil.rmtree(self.save_dir, ignore_errors=True)
 
-    def _ensure_available(self) -> None:
-        if shutil.which(self.ffprobe) is None:
-            raise DependencyMissingError(f"Missing external dependency: {self.ffprobe}")
+    def list_speaker(self) -> list[str]:
+        """Return available voice identifiers for this backend."""
 
-        try:
-            import_module("edge_tts")
-        except ModuleNotFoundError as exc:
-            raise DependencyMissingError(
-                "Missing Python dependency: edge-tts. Install it with `uv add edge-tts`."
-            ) from exc
+        return self.list_speakers()
+
+    def list_speakers(self) -> list[str]:
+        """Return available voice identifiers for this backend."""
+
+        return []
+
+    @abstractmethod
+    def save_audio(self, text: str) -> Path:
+        """Render ``text`` to disk and return the created audio file."""
 
     def _probe_duration_seconds(self, media_path: Path) -> float:
         command = [
@@ -145,3 +112,66 @@ class EdgeTTSBackend:
                 f"Generated narration clip has an invalid duration: {duration}"
             )
         return duration
+
+
+class EdgeTTSBackend(TTSBackend):
+    """Generate narration clips with the optional ``edge-tts`` package."""
+
+    def __init__(
+        self,
+        *,
+        save_dir: str | Path,
+        speaker: str = "en-US-AvaNeural",
+        speed: str = "+0%",
+        volume: str = "+0%",
+        ffprobe: str = "ffprobe",
+    ) -> None:
+        super().__init__(save_dir=save_dir, ffprobe=ffprobe)
+        self.speaker = speaker
+        self.speed = speed
+        self.volume = volume
+        self._index = 1
+
+    def save_audio(self, text: str) -> Path:
+        """Render ``text`` to a new MP3 file and return its path."""
+
+        edge_tts = self._load_edge_tts()
+        output_path = self.save_dir / f"clip-{self._index:04}.mp3"
+        self._index += 1
+
+        communicate = edge_tts.Communicate(
+            text,
+            self.speaker,
+            rate=self.speed,
+            volume=self.volume,
+        )
+        save_sync = getattr(communicate, "save_sync", None)
+        if callable(save_sync):
+            save_sync(str(output_path))
+        else:
+            asyncio.run(communicate.save(str(output_path)))
+        return output_path
+
+    def list_speakers(self) -> list[str]:
+        """Return all available Edge TTS voice names."""
+
+        edge_tts = self._load_edge_tts()
+        list_voices = getattr(edge_tts, "list_voices", None)
+        if callable(list_voices):
+            voices = list_voices()
+            if asyncio.iscoroutine(voices):
+                voices = asyncio.run(voices)
+            return sorted(
+                voice["ShortName"]
+                for voice in voices
+                if isinstance(voice, dict) and "ShortName" in voice
+            )
+        return []
+
+    def _load_edge_tts(self):
+        try:
+            return import_module("edge_tts")
+        except ModuleNotFoundError as exc:
+            raise DependencyMissingError(
+                "Missing Python dependency: edge-tts. Install it with `uv add edge-tts`."
+            ) from exc

@@ -14,7 +14,7 @@ from demo_video_recorder.defaults import DEFAULTS
 from demo_video_recorder.errors import RecordingError
 from demo_video_recorder.macos import check_screen_recording_access
 from demo_video_recorder.subtitles import CueDisplay, SubtitleWriter
-from demo_video_recorder.tts import NarrationClip, TTSBackend
+from demo_video_recorder.tts import NarrationClip, SynthesizedAudio, TTSBackend
 from demo_video_recorder.types import CaptureRegion, WindowInfo
 from demo_video_recorder import windowing
 
@@ -183,10 +183,16 @@ class DemoVideoRecorder:
         self.subtitles.start_clock()
         return self
 
-    def explain(self, text: str, *, wait: bool = True) -> "DemoVideoRecorder":
+    def explain(
+        self,
+        text: str,
+        *,
+        wait: bool = True,
+        audio: SynthesizedAudio | str | Path | None = None,
+    ) -> "DemoVideoRecorder":
         """Add narration text that will be burned as subtitles."""
 
-        if self.tts is None:
+        if self.tts is None and audio is None:
             self.subtitles.add_cue(text, wait=wait)
             return self
 
@@ -194,7 +200,7 @@ class DemoVideoRecorder:
         if start_seconds is None:
             return self
 
-        clip = self.tts.synthesize(text)
+        clip = self._resolve_explanation_audio(text, audio)
         self._narration_clips.append(
             NarrationClip(
                 text=text.strip(),
@@ -208,6 +214,13 @@ class DemoVideoRecorder:
                 CueDisplay(start_seconds + clip.duration_seconds)
             )
         return self
+
+    def synthesize_explanation_audio(self, text: str) -> SynthesizedAudio:
+        """Generate narration audio ahead of time for a later ``explain()`` call."""
+
+        if self.tts is None:
+            raise RecordingError("Narration audio was requested, but TTS is disabled.")
+        return self.tts.synthesize(text)
 
     def wait(self, seconds: float) -> "DemoVideoRecorder":
         time.sleep(seconds)
@@ -268,7 +281,7 @@ class DemoVideoRecorder:
     ) -> Path:
         """Render the synthesized narration timeline without screen capture."""
 
-        if self.tts is None:
+        if self.tts is None and not self._narration_clips:
             raise RecordingError("Narration audio was requested, but TTS is disabled.")
         if not self._narration_clips:
             raise RecordingError("No narration clips were generated.")
@@ -339,7 +352,7 @@ class DemoVideoRecorder:
         return self.output_path
 
     def _render_narration_audio(self) -> Path | None:
-        if self.tts is None or not self._narration_clips:
+        if not self._narration_clips:
             return None
         return self.capture.render_narration_audio(
             self._narration_clips,
@@ -351,3 +364,22 @@ class DemoVideoRecorder:
             return
         self.tts.cleanup()
         self.narration_audio_path.unlink(missing_ok=True)
+
+    def _resolve_explanation_audio(
+        self,
+        text: str,
+        audio: SynthesizedAudio | str | Path | None,
+    ) -> SynthesizedAudio:
+        if isinstance(audio, SynthesizedAudio):
+            return audio
+        if audio is not None:
+            audio_path = Path(audio)
+            return SynthesizedAudio(
+                path=audio_path,
+                duration_seconds=self.capture.probe_duration_seconds(audio_path),
+            )
+        if self.tts is None:
+            raise RecordingError(
+                "Narration audio was requested, but no TTS backend is configured."
+            )
+        return self.tts.synthesize(text)

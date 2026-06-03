@@ -41,6 +41,12 @@ Add narration audio with Edge TTS:
 uv run python record.py --new-window --tts
 ```
 
+Print the available Edge TTS speakers:
+
+```bash
+uv run python record.py --list-speakers
+```
+
 Test only the narration path without opening a new terminal window or recording the screen:
 
 ```bash
@@ -86,13 +92,19 @@ def main():
     r = CLIDemoRecorder("out/demo.mp4", words_per_minute=165, tts=tts)
     try:
         r.open_terminal(title="Demo", top=True, start_recording=True)
+        prepared = r.synthesize_explanation_audio(
+            "The app responds to typed input while subtitles explain the action."
+        )
         r.explain("Today we'll demo the main workflow.")
         r.run(["python", "app.py"], interactive=True, command_label="python app.py")
         r.expect_output(">")
         marker = r.mark_output()
         r.input("help")
         r.expect_regex(r"Commands?:", since=marker)
-        r.explain("The app responds to typed input while subtitles explain the action.")
+        r.explain(
+            "The app responds to typed input while subtitles explain the action.",
+            audio=prepared,
+        )
         r.input("quit")
         r.stop_app()
     finally:
@@ -111,12 +123,14 @@ Useful methods:
 - `mark_output()` / `output_since(marker)`: isolate output caused by one action.
 - `output_text("stdout")` and `output_text("stderr")`: inspect streams separately.
 - `explain("...")`: adds narration subtitles and, when TTS is configured, also generates a spoken narration clip.
+- `synthesize_explanation_audio("...")`: prepares a narration clip ahead of time so `explain()` does not need to wait on synthesis during capture.
+- `EdgeTTSBackend.list_speakers()`: returns available Edge voices so you can choose one that fits the audience and tone.
 - `stop_recording()`: stops capture, trims subtitles to video duration, and writes the final MP4 with subtitles and narration audio.
 - `render_narration_audio()`: exports just the synthesized narration timeline, useful for `--audio-only` test runs.
 
 When `new_window=True` is used, the recorder re-runs the script in a dedicated terminal session. On Windows it opens a new console; on macOS it opens a new Terminal.app window and captures that window instead of the whole display when bounds are available. Worker stdout and stderr are also mirrored to `out/<name>.worker.log`. If the worker fails, the parent process prints the log tail so the recording script is easier to debug.
 
-When TTS is enabled, `explain()` uses the real generated audio length instead of the word-count estimate. Intermediate per-line clips are removed after the final output unless `keep_tts_audio=True`.
+When TTS is enabled, `explain()` uses the real generated audio length instead of the word-count estimate. If synthesis latency could show up in the capture, pre-generate the clip and pass it into `explain(..., audio=prepared_audio)`. Intermediate per-line clips are removed after the final output unless `keep_tts_audio=True`.
 
 ## GUI or App Window API
 
