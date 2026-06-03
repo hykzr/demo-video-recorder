@@ -17,7 +17,7 @@ import sys
 import time
 
 from demo_video_recorder.errors import WindowNotFoundError
-from demo_video_recorder.macos import get_main_display_scale_factor
+from demo_video_recorder.macos import get_display_scale_factor_for_rect
 from demo_video_recorder.types import CaptureRegion, WindowInfo
 
 IS_WINDOWS = platform.system() == "Windows"
@@ -363,7 +363,7 @@ def _parse_macos_window(output: str | None) -> WindowInfo | None:
     except ValueError:
         return None
 
-    scale = get_main_display_scale_factor()
+    scale = get_display_scale_factor_for_rect(left, top, right, bottom)
     width = max(int(round((right - left) * scale)), 0)
     height = max(int(round((bottom - top) * scale)), 0)
     if width <= 0 or height <= 0:

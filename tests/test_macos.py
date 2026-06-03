@@ -56,7 +56,7 @@ def test_configure_current_console_reads_macos_terminal_bounds(monkeypatch) -> N
     monkeypatch.setattr(windowing, "_macos_terminal_app_name", lambda: "Terminal")
     monkeypatch.setattr(windowing, "_activate_macos_console", lambda: None)
     monkeypatch.setattr(windowing, "_current_tty_path", lambda: "/dev/ttys123")
-    monkeypatch.setattr(windowing, "get_main_display_scale_factor", lambda: 2.0)
+    monkeypatch.setattr(windowing, "get_display_scale_factor_for_rect", lambda *_: 2.0)
 
     def fake_osascript(lines: list[str]) -> str:
         script = "\n".join(lines)
@@ -81,7 +81,7 @@ def test_configure_current_console_falls_back_to_title_match(monkeypatch) -> Non
     monkeypatch.setattr(windowing, "_macos_terminal_app_name", lambda: "Terminal")
     monkeypatch.setattr(windowing, "_activate_macos_console", lambda: None)
     monkeypatch.setattr(windowing, "_current_tty_path", lambda: None)
-    monkeypatch.setattr(windowing, "get_main_display_scale_factor", lambda: 2.0)
+    monkeypatch.setattr(windowing, "get_display_scale_factor_for_rect", lambda *_: 2.0)
 
     def fake_osascript(lines: list[str]) -> str:
         script = "\n".join(lines)
@@ -97,3 +97,36 @@ def test_configure_current_console_falls_back_to_title_match(monkeypatch) -> Non
     assert window.title == "Demo"
     assert window.region.left == 20
     assert window.region.top == 40
+
+
+def test_get_main_display_scale_factor_uses_display_mode_pixels(monkeypatch) -> None:
+    class _FakeGraphics:
+        def CGMainDisplayID(self) -> int:
+            return 7
+
+        def CGDisplayCopyDisplayMode(self, display_id: int) -> int:
+            assert display_id == 7
+            return 123
+
+        def CGDisplayModeGetPixelWidth(self, mode: int) -> int:
+            assert mode == 123
+            return 2560
+
+        def CGDisplayModeGetWidth(self, mode: int) -> int:
+            assert mode == 123
+            return 1280
+
+    class _FakeFoundation:
+        def __init__(self) -> None:
+            self.released: list[int] = []
+
+        def CFRelease(self, value: int) -> None:
+            self.released.append(value)
+
+    graphics = _FakeGraphics()
+    foundation = _FakeFoundation()
+    monkeypatch.setattr(macos, "_core_graphics", lambda: graphics)
+    monkeypatch.setattr(macos, "_core_foundation", lambda: foundation)
+
+    assert macos.get_main_display_scale_factor() == 2.0
+    assert foundation.released == [123]
