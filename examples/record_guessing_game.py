@@ -9,6 +9,7 @@ import sys
 from demo_video_recorder import (
     CLIDemoRecorder,
     DEFAULTS,
+    EdgeTTSBackend,
     FAST_SMOKE_TEST_DEFAULTS,
     ProcessError,
 )
@@ -23,12 +24,17 @@ OUTCOME_PATTERN = (
 MAX_REOPEN_ATTEMPTS = 10
 
 
+def default_output_path(*, audio_only: bool) -> Path:
+    suffix = ".m4a" if audio_only else ".mp4"
+    return ROOT / "out" / f"guessing-game-demo{suffix}"
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
-        default=str(ROOT / "out" / "guessing-game-demo.mp4"),
-        help="Final MP4 path.",
+        default=None,
+        help="Final output path. Defaults to MP4, or M4A with --audio-only.",
     )
     parser.add_argument(
         "--new-window",
@@ -41,9 +47,44 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run the scripted demo without screen capture.",
     )
     parser.add_argument(
+        "--audio-only",
+        action="store_true",
+        help="Skip terminal/window capture and render only the narration audio timeline.",
+    )
+    parser.add_argument(
         "--fast",
         action="store_true",
         help="Use shorter pauses for quick local smoke tests.",
+    )
+    parser.add_argument(
+        "--tts",
+        action="store_true",
+        help="Use Edge TTS so explain() also produces narration audio.",
+    )
+    parser.add_argument(
+        "--tts-speaker",
+        default="en-US-JennyNeural",
+        help="Edge TTS speaker/voice name.",
+    )
+    parser.add_argument(
+        "--tts-speed",
+        default="+0%",
+        help="Edge TTS speech rate, for example +10%% or -15%%.",
+    )
+    parser.add_argument(
+        "--tts-volume",
+        default="+0%",
+        help="Edge TTS volume adjustment, for example +0%% or -20%%.",
+    )
+    parser.add_argument(
+        "--tts-save-dir",
+        default=None,
+        help="Directory for intermediate per-line TTS clips.",
+    )
+    parser.add_argument(
+        "--keep-tts-audio",
+        action="store_true",
+        help="Keep the generated per-line TTS clips and mixed narration track.",
     )
     parser.add_argument(
         "--check-access",
@@ -114,7 +155,7 @@ def play_by_feedback(recorder: CLIDemoRecorder, low: int, high: int) -> int:
 
         recorder.expect_output("Thanks for playing.", since=marker, timeout_seconds=5)
         recorder.explain(
-            f"And there we go: it was {guess}. The recorder got there by reacting to the app output."
+            f"And there we go: it was {guess}. We got there by reacting to the app output."
         )
         recorder.stop_app()
         return guess
@@ -132,21 +173,47 @@ def play_one_game(recorder: CLIDemoRecorder, *, launch_message: str) -> int:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     settings = FAST_SMOKE_TEST_DEFAULTS if args.fast else DEFAULTS
-
-    recorder = CLIDemoRecorder(
-        args.output,
-        **settings.recorder_kwargs(),  # type: ignore
-        keep_raw=False,
+    audio_only = args.audio_only
+    tts_enabled = args.tts or audio_only
+    output_path = (
+        Path(args.output)
+        if args.output is not None
+        else default_output_path(audio_only=audio_only)
+    )
+    tts_save_dir = (
+        Path(args.tts_save_dir)
+        if args.tts_save_dir is not None
+        else output_path.with_name(f"{output_path.stem}.tts")
+    )
+    tts_backend = (
+        EdgeTTSBackend(
+            save_dir=tts_save_dir,
+            speaker=args.tts_speaker,
+            speed=args.tts_speed,
+            volume=args.tts_volume,
+        )
+        if tts_enabled
+        else None
     )
 
+    recorder = CLIDemoRecorder(
+        output_path,
+        **settings.recorder_kwargs(),  # type: ignore
+        keep_raw=False,
+        keep_tts_audio=args.keep_tts_audio,
+        tts=tts_backend,
+    )
+    final_path: Path | None = None
+
     try:
-        recorder.open_terminal(
-            title="Guessing Game Demo",
-            top=True,
-            start_recording=not args.no_record,
-            new_window=args.new_window,
-            check_access=args.check_access and not args.no_record,
-        )
+        if not audio_only:
+            recorder.open_terminal(
+                title="Guessing Game Demo",
+                top=True,
+                start_recording=not args.no_record,
+                new_window=args.new_window,
+                check_access=args.check_access and not args.no_record,
+            )
 
         recorder.explain(
             "Let's do this like a real little live demo: the game picks randomly, and I'll figure it out from the clues."
@@ -181,11 +248,19 @@ def main(argv: list[str] | None = None) -> int:
         recorder.explain(
             "That's the demo: random app behavior, output-aware guesses, and a clean reopen check."
         )
+        if audio_only:
+            final_path = recorder.render_narration_audio(output_path)
+        elif args.no_record and tts_enabled:
+            final_path = recorder.render_narration_audio(
+                output_path.with_suffix(".m4a")
+            )
     finally:
         recorder.close()
         if recorder.is_recording:
             final_path = recorder.stop_recording()
-            print(f"\nRecorded demo: {final_path}")
+
+    if final_path is not None:
+        print(f"\nRecorded demo: {final_path}")
 
     return 0
 

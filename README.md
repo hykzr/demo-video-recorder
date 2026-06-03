@@ -1,8 +1,8 @@
 # demo-video-recorder
 
-Scriptable demo video recording for Python agents and humans. The package separates reusable recording primitives from project-specific demo steps, so an agent can inspect a project, write a small `record_demo.py`, react to CLI output, and produce an MP4 with burned subtitles.
+Scriptable demo video recording for Python agents and humans. The package separates reusable recording primitives from project-specific demo steps, so an agent can inspect a project, write a small `record_demo.py`, react to CLI output, and produce an MP4 with burned subtitles and optional narration audio.
 
-The built-in backend uses the installed `ffmpeg` and `ffprobe` executables for screen capture, encoding, probing, and subtitle burn-in. Windows capture uses `gdigrab`; macOS capture uses `avfoundation`. Linux capture is not implemented yet.
+The built-in backend uses the installed `ffmpeg` and `ffprobe` executables for screen capture, encoding, probing, subtitle burn-in, and narration audio muxing. Windows capture uses `gdigrab`; macOS capture uses `avfoundation`. Linux capture is not implemented yet.
 
 ## Install
 
@@ -35,6 +35,18 @@ Record the bundled CLI example:
 uv run python record.py --new-window
 ```
 
+Add narration audio with Edge TTS:
+
+```bash
+uv run python record.py --new-window --tts
+```
+
+Test only the narration path without opening a new terminal window or recording the screen:
+
+```bash
+uv run python record.py --audio-only
+```
+
 On macOS, `record.py` defaults to `--check-access`, which requests Screen Recording permission before capture starts and stops early if access is still denied.
 
 The example app lives in `examples/guessing_game.py`; the recording script is `examples/record_guessing_game.py`.
@@ -61,19 +73,26 @@ Use `FAST_SMOKE_TEST_DEFAULTS` for quick local script checks, not polished final
 
 ```python
 from demo_video_recorder import CLIDemoRecorder
+from demo_video_recorder import EdgeTTSBackend
 
 
 def main():
-    r = CLIDemoRecorder("out/demo.mp4", words_per_minute=165)
+    tts = EdgeTTSBackend(
+        save_dir="out/demo.tts",
+        speaker="en-US-JennyNeural",
+        speed="+0%",
+        volume="+0%",
+    )
+    r = CLIDemoRecorder("out/demo.mp4", words_per_minute=165, tts=tts)
     try:
         r.open_terminal(title="Demo", top=True, start_recording=True)
-        r.show_explanation("Today we'll demo the main workflow.")
+        r.explain("Today we'll demo the main workflow.")
         r.run(["python", "app.py"], interactive=True, command_label="python app.py")
         r.expect_output(">")
         marker = r.mark_output()
         r.input("help")
         r.expect_regex(r"Commands?:", since=marker)
-        r.show_explanation("The app responds to typed input while subtitles explain the action.")
+        r.explain("The app responds to typed input while subtitles explain the action.")
         r.input("quit")
         r.stop_app()
     finally:
@@ -91,10 +110,13 @@ Useful methods:
 - `expect_regex(r"...")`: waits for a regex match and returns the match object.
 - `mark_output()` / `output_since(marker)`: isolate output caused by one action.
 - `output_text("stdout")` and `output_text("stderr")`: inspect streams separately.
-- `show_explanation("...")`: adds narration subtitles and waits long enough to read them.
-- `stop_recording()`: stops capture, trims subtitles to video duration, and burns subtitles into the final MP4.
+- `explain("...")`: adds narration subtitles and, when TTS is configured, also generates a spoken narration clip.
+- `stop_recording()`: stops capture, trims subtitles to video duration, and writes the final MP4 with subtitles and narration audio.
+- `render_narration_audio()`: exports just the synthesized narration timeline, useful for `--audio-only` test runs.
 
 When `new_window=True` is used, the recorder re-runs the script in a dedicated terminal session. On Windows it opens a new console; on macOS it opens a new Terminal.app window and captures that window instead of the whole display when bounds are available. Worker stdout and stderr are also mirrored to `out/<name>.worker.log`. If the worker fails, the parent process prints the log tail so the recording script is easier to debug.
+
+When TTS is enabled, `explain()` uses the real generated audio length instead of the word-count estimate. Intermediate per-line clips are removed after the final output unless `keep_tts_audio=True`.
 
 ## GUI or App Window API
 
@@ -109,7 +131,7 @@ def main():
     try:
         r.open_app(["notepad.exe"], title_hint="Untitled - Notepad", capture_window=True)
         r.start_capture_window()
-        r.show_explanation("Notepad is open and the window is being captured.")
+        r.explain("Notepad is open and the window is being captured.")
     finally:
         r.close()
         if r.is_recording:
@@ -122,7 +144,7 @@ See `AGENT.md` for instructions aimed at coding agents. The intended flow is:
 
 1. Inspect the target project.
 2. Write a small deterministic recording script.
-3. Use `show_explanation()` around visible actions.
+3. Use `explain()` around visible actions.
 4. Run and fix the script until `out/<name>.mp4` is created.
 
 ## Publish Notes

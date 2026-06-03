@@ -102,7 +102,7 @@ class SubtitleWriter:
         words_per_second = max(self.words_per_minute / 60.0, 1.0)
         return max(self.min_pause_seconds, word_count / words_per_second)
 
-    def start_cue(self, text: str) -> CueDisplay | None:
+    def open_cue(self, text: str) -> float | None:
         trimmed = text.strip()
         if not trimmed:
             return None
@@ -113,7 +113,13 @@ class SubtitleWriter:
         start_seconds = self.elapsed_seconds()
         self.complete_cue(end_seconds=start_seconds)
         self._pending = _PendingCue(trimmed, start_seconds)
-        return CueDisplay(start_seconds + self.read_delay_seconds(trimmed))
+        return start_seconds
+
+    def start_cue(self, text: str) -> CueDisplay | None:
+        start_seconds = self.open_cue(text)
+        if start_seconds is None:
+            return None
+        return CueDisplay(start_seconds + self.read_delay_seconds(text.strip()))
 
     def wait_for_display(self, cue: CueDisplay | None) -> None:
         if cue is None:

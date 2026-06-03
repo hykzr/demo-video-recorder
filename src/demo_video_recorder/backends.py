@@ -15,6 +15,7 @@ import time
 from demo_video_recorder.defaults import DEFAULTS
 from demo_video_recorder.errors import DependencyMissingError, RecordingError
 from demo_video_recorder.subtitles import parse_srt_time
+from demo_video_recorder.tts import NarrationClip
 from demo_video_recorder.types import CaptureRegion
 
 
@@ -133,8 +134,11 @@ class FfmpegCaptureBackend:
             detail = (stderr + "\n" + stdout).strip()
             raise RecordingError(f"ffmpeg capture failed.\n{detail}")
 
-    def probe_duration_seconds(self) -> float:
+    def probe_duration_seconds(self, media_path: str | Path | None = None) -> float:
         self.ensure_available()
+        target_path = (
+            Path(media_path) if media_path is not None else self.raw_video_path
+        )
         command = [
             self.ffprobe,
             "-v",
@@ -143,7 +147,7 @@ class FfmpegCaptureBackend:
             "format=duration",
             "-of",
             "default=noprint_wrappers=1:nokey=1",
-            str(self.raw_video_path),
+            str(target_path),
         ]
         result = subprocess.run(
             command,
@@ -167,18 +171,26 @@ class FfmpegCaptureBackend:
         return duration
 
     def burn_subtitles(
-        self, subtitle_path: str | Path, output_path: str | Path
+        self,
+        subtitle_path: str | Path,
+        output_path: str | Path,
+        *,
+        audio_path: str | Path | None = None,
     ) -> Path:
         self.ensure_available()
         subtitle_path = Path(subtitle_path)
         output_path = Path(output_path)
+        audio_path = Path(audio_path) if audio_path is not None else None
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         if (
             not subtitle_path.exists()
             or not subtitle_path.read_text(encoding="utf-8").strip()
         ):
-            shutil.copy2(self.raw_video_path, output_path)
+            if audio_path is None:
+                shutil.copy2(self.raw_video_path, output_path)
+            else:
+                self._mux_audio(audio_path=audio_path, output_path=output_path)
             return output_path
 
         temp_subtitle = (
@@ -192,10 +204,77 @@ class FfmpegCaptureBackend:
                 subtitle_path=temp_subtitle,
                 output_path=output_path,
                 ffmpeg_binary=subtitle_ffmpeg,
+                audio_path=audio_path,
             )
         finally:
             temp_subtitle.unlink(missing_ok=True)
 
+        return output_path
+
+    def render_narration_audio(
+        self,
+        clips: list[NarrationClip],
+        output_path: str | Path,
+    ) -> Path:
+        """Mix all narration clips into a single timeline-aligned audio file."""
+
+        self.ensure_available()
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if not clips:
+            raise RecordingError("No narration clips were generated.")
+
+        command = [
+            self.ffmpeg,
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+        ]
+        for clip in clips:
+            command.extend(["-i", str(clip.path.resolve())])
+
+        filter_parts: list[str] = []
+        input_labels: list[str] = []
+        for index, clip in enumerate(clips):
+            label = f"a{index}"
+            delay_ms = max(0, round(clip.start_seconds * 1000))
+            filter_parts.append(f"[{index}:a]adelay={delay_ms}:all=1[{label}]")
+            input_labels.append(f"[{label}]")
+
+        if len(input_labels) == 1:
+            filter_parts.append(f"{input_labels[0]}acopy[aout]")
+        else:
+            filter_parts.append(
+                f"{''.join(input_labels)}amix=inputs={len(input_labels)}:normalize=0[aout]"
+            )
+
+        command.extend(
+            [
+                "-filter_complex",
+                ";".join(filter_parts),
+                "-map",
+                "[aout]",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "192k",
+                str(output_path.resolve()),
+            ]
+        )
+
+        result = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        if result.returncode != 0:
+            detail = (result.stderr + "\n" + result.stdout).strip()
+            raise RecordingError(f"ffmpeg narration mix failed.\n{detail}")
         return output_path
 
     def _resolve_subtitle_burn_ffmpeg(self) -> str:
@@ -426,6 +505,7 @@ class FfmpegCaptureBackend:
         subtitle_path: Path,
         output_path: Path,
         ffmpeg_binary: str,
+        audio_path: Path | None = None,
     ) -> None:
         command = [
             ffmpeg_binary,
@@ -435,20 +515,27 @@ class FfmpegCaptureBackend:
             "error",
             "-i",
             self.raw_video_path.name,
-            "-vf",
-            self._subtitles_filter_value(subtitle_path),
-            "-c:v",
-            "libx264",
-            "-preset",
-            "medium",
-            "-crf",
-            "23",
-            "-pix_fmt",
-            "yuv420p",
-            "-movflags",
-            "+faststart",
-            str(output_path.resolve()),
         ]
+        if audio_path is not None:
+            command.extend(["-i", str(audio_path.resolve())])
+
+        command.extend(
+            [
+                "-vf",
+                self._subtitles_filter_value(subtitle_path),
+                "-c:v",
+                "libx264",
+                "-preset",
+                "medium",
+                "-crf",
+                "23",
+                "-pix_fmt",
+                "yuv420p",
+            ]
+        )
+        if audio_path is not None:
+            command.extend(["-map", "0:v:0", "-map", "1:a:0", "-c:a", "aac"])
+        command.extend(["-movflags", "+faststart", str(output_path.resolve())])
         result = subprocess.run(
             command,
             cwd=str(self.raw_video_path.parent),
@@ -461,6 +548,41 @@ class FfmpegCaptureBackend:
         if result.returncode != 0:
             detail = (result.stderr + "\n" + result.stdout).strip()
             raise RecordingError(f"ffmpeg subtitle burn failed.\n{detail}")
+
+    def _mux_audio(self, *, audio_path: Path, output_path: Path) -> None:
+        command = [
+            self.ffmpeg,
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(self.raw_video_path.resolve()),
+            "-i",
+            str(audio_path.resolve()),
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:a:0",
+            "-c:v",
+            "copy",
+            "-c:a",
+            "aac",
+            "-movflags",
+            "+faststart",
+            str(output_path.resolve()),
+        ]
+        result = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        if result.returncode != 0:
+            detail = (result.stderr + "\n" + result.stdout).strip()
+            raise RecordingError(f"ffmpeg audio mux failed.\n{detail}")
 
     def _burn_subtitles_with_macos_overlay(
         self,

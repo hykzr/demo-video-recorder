@@ -9,8 +9,8 @@ Use `demo-video-recorder` when the user asks for an automated demo video of a pr
 3. Prefer `CLIDemoRecorder` for terminal apps and `DemoVideoRecorder` for GUI or browser windows.
 4. Record to `out/<project>-demo.mp4`, or the required location by user; if unspecified, keep generated output out of source control.
 5. Follow the user's prompt first for speed, pauses, tone, and coverage. If they do not specify speed, use `DEFAULTS` from the library.
-6. Follow the user's requested tone when given. Otherwise use a human live-demo style: natural, somewhat casual or lightly humorous, but still accurate and comprehensive.
-7. Use `show_explanation()` before or after each visible action so the final video has useful burned subtitles.
+6. Follow the user's requested tone when given. Otherwise use a human live-demo style: natural, somewhat casual or lightly humorous, but still accurate and comprehensive. Unless otherwise specified, your subject should be I or we instead of "the recorder", "the tool".
+7. Use `explain()` before or after each visible action so the final video has useful burned subtitles, and spoken narration too when TTS is configured.
 8. Run the script yourself. First run a fast smoke test, fix timing, app startup, and input issues until the demo completes. You must check breaking and unintended exceptions or errors during recording, and if the actual video output is not blank and has subtitles.
 9. Record the final production demo once the interaction is stable.
 10. Stop and tell the user when a global dependency is missing, especially `ffmpeg` or `ffprobe`. On macOS, burned subtitles also require an `ffmpeg` build with the `subtitles` filter (`libass`) (e.g. ffmpeg-full), not the default Homebrew core formula.
@@ -56,13 +56,13 @@ def main():
     r = CLIDemoRecorder("out/demo.mp4", **DEFAULTS.recorder_kwargs())
     try:
         r.open_terminal(title="Project Demo", top=True, start_recording=True)
-        r.show_explanation("Let's take this for a real spin and react to what the app tells us.")
+        r.explain("Let's take this for a real spin and react to what the app tells us.")
         r.run(["python", "app.py"], interactive=True, command_label="python app.py")
         r.expect_output(">")
         marker = r.mark_output()
         r.input("help")
         r.expect_output("Commands", since=marker)
-        r.show_explanation("The help output confirms the available actions.")
+        r.explain("The help output confirms the available actions.")
         r.input("quit")
         r.stop_app()
     finally:
@@ -85,7 +85,7 @@ def main():
     try:
         r.open_app(["notepad.exe"], title_hint="Untitled - Notepad", capture_window=True)
         r.start_capture_window()
-        r.show_explanation("The app is open and ready for the first action.")
+        r.explain("The app is open and ready for the first action.")
     finally:
         r.close()
         if r.is_recording:

@@ -13,7 +13,8 @@ from demo_video_recorder.backends import FfmpegCaptureBackend
 from demo_video_recorder.defaults import DEFAULTS
 from demo_video_recorder.errors import RecordingError
 from demo_video_recorder.macos import check_screen_recording_access
-from demo_video_recorder.subtitles import SubtitleWriter
+from demo_video_recorder.subtitles import CueDisplay, SubtitleWriter
+from demo_video_recorder.tts import NarrationClip, TTSBackend
 from demo_video_recorder.types import CaptureRegion, WindowInfo
 from demo_video_recorder import windowing
 
@@ -40,9 +41,12 @@ class DemoVideoRecorder:
         video_scale_width: int | None = DEFAULTS.video_scale_width,
         burn_subtitles: bool = True,
         keep_raw: bool = False,
+        keep_tts_audio: bool = False,
         ffmpeg: str = "ffmpeg",
         ffprobe: str = "ffprobe",
         draw_mouse: bool = False,
+        tts: TTSBackend | None = None,
+        narration_audio_path: str | Path | None = None,
     ) -> None:
         self.output_path = Path(output_path)
         self.raw_video_path = (
@@ -57,6 +61,7 @@ class DemoVideoRecorder:
         )
         self.burn_subtitles_by_default = burn_subtitles
         self.keep_raw = keep_raw
+        self.keep_tts_audio = keep_tts_audio
         self.subtitles = SubtitleWriter(
             self.subtitle_path,
             words_per_minute=words_per_minute,
@@ -71,6 +76,13 @@ class DemoVideoRecorder:
             ffprobe=ffprobe,
             draw_mouse=draw_mouse,
         )
+        self.tts = tts
+        self.narration_audio_path = (
+            Path(narration_audio_path)
+            if narration_audio_path is not None
+            else self.output_path.with_name(f"{self.output_path.stem}.narration.m4a")
+        )
+        self._narration_clips: list[NarrationClip] = []
         self.capture_window: WindowInfo | None = None
         self.capture_region: CaptureRegion | None = None
         self.opened_processes: list[subprocess.Popen[bytes]] = []
@@ -165,6 +177,7 @@ class DemoVideoRecorder:
             self.capture_region = region
 
         self.subtitles.reset_file()
+        self._narration_clips = []
         self.capture.start(region=self.capture_region)
         self.capture.wait_until_ready()
         self.subtitles.start_clock()
@@ -173,7 +186,27 @@ class DemoVideoRecorder:
     def explain(self, text: str, *, wait: bool = True) -> "DemoVideoRecorder":
         """Add narration text that will be burned as subtitles."""
 
-        self.subtitles.add_cue(text, wait=wait)
+        if self.tts is None:
+            self.subtitles.add_cue(text, wait=wait)
+            return self
+
+        start_seconds = self.subtitles.open_cue(text)
+        if start_seconds is None:
+            return self
+
+        clip = self.tts.synthesize(text)
+        self._narration_clips.append(
+            NarrationClip(
+                text=text.strip(),
+                path=clip.path,
+                start_seconds=start_seconds,
+                duration_seconds=clip.duration_seconds,
+            )
+        )
+        if wait:
+            self.subtitles.wait_for_display(
+                CueDisplay(start_seconds + clip.duration_seconds)
+            )
         return self
 
     def wait(self, seconds: float) -> "DemoVideoRecorder":
@@ -196,20 +229,66 @@ class DemoVideoRecorder:
             self.subtitles.trim_to_duration(duration)
 
         should_burn = self.burn_subtitles_by_default if burn is None else burn
+        narration_audio_path = self._render_narration_audio()
         if should_burn:
-            final_path = self.burn_subtitles()
+            final_path = self.burn_subtitles(audio_path=narration_audio_path)
         else:
-            final_path = self.raw_video_path
+            if narration_audio_path is not None:
+                self.output_path.parent.mkdir(parents=True, exist_ok=True)
+                self.capture.burn_subtitles(
+                    self.subtitle_path,
+                    self.output_path,
+                    audio_path=narration_audio_path,
+                )
+                final_path = self.output_path
+            else:
+                final_path = self.raw_video_path
 
-        if should_burn and not self.keep_raw and self.raw_video_path.exists():
+        if (
+            final_path != self.raw_video_path
+            and not self.keep_raw
+            and self.raw_video_path.exists()
+        ):
             self.raw_video_path.unlink(missing_ok=True)
+        self._cleanup_narration_artifacts()
 
         return final_path
 
-    def burn_subtitles(self) -> Path:
+    def burn_subtitles(self, *, audio_path: str | Path | None = None) -> Path:
         """Burn the current SRT file into the raw recording."""
 
-        return self.capture.burn_subtitles(self.subtitle_path, self.output_path)
+        return self.capture.burn_subtitles(
+            self.subtitle_path,
+            self.output_path,
+            audio_path=audio_path,
+        )
+
+    def render_narration_audio(
+        self, output_path: str | Path | None = None
+    ) -> Path:
+        """Render the synthesized narration timeline without screen capture."""
+
+        if self.tts is None:
+            raise RecordingError("Narration audio was requested, but TTS is disabled.")
+        if not self._narration_clips:
+            raise RecordingError("No narration clips were generated.")
+
+        if not self.subtitles.is_started:
+            self.subtitles.start_clock()
+        self.subtitles.complete_cue()
+
+        target_path = (
+            Path(output_path)
+            if output_path is not None
+            else self.output_path.with_suffix(".m4a")
+        )
+        final_path = self.capture.render_narration_audio(
+            self._narration_clips,
+            target_path,
+        )
+        if not self.keep_tts_audio and self.tts is not None:
+            self.tts.cleanup()
+        return final_path
 
     def ensure_screen_recording_access(
         self,
@@ -258,3 +337,17 @@ class DemoVideoRecorder:
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(self.raw_video_path, self.output_path)
         return self.output_path
+
+    def _render_narration_audio(self) -> Path | None:
+        if self.tts is None or not self._narration_clips:
+            return None
+        return self.capture.render_narration_audio(
+            self._narration_clips,
+            self.narration_audio_path,
+        )
+
+    def _cleanup_narration_artifacts(self) -> None:
+        if self.keep_tts_audio or self.tts is None:
+            return
+        self.tts.cleanup()
+        self.narration_audio_path.unlink(missing_ok=True)
