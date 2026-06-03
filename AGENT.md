@@ -13,7 +13,7 @@ Use `demo-video-recorder` when the user asks for an automated demo video of a pr
 7. Use `show_explanation()` before or after each visible action so the final video has useful burned subtitles.
 8. Run the script yourself. First run a fast smoke test, fix timing, app startup, and input issues until the demo completes. You must check breaking and unintended exceptions or errors during recording, and if the actual video output is not blank and has subtitles.
 9. Record the final production demo once the interaction is stable.
-10. Stop and tell the user when a global dependency is missing, especially `ffmpeg` or `ffprobe`.
+10. Stop and tell the user when a global dependency is missing, especially `ffmpeg` or `ffprobe`. On macOS, burned subtitles also require an `ffmpeg` build with the `subtitles` filter (`libass`) (e.g. ffmpeg-full), not the default Homebrew core formula.
 
 ## Defaults
 

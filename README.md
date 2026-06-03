@@ -2,28 +2,40 @@
 
 Scriptable demo video recording for Python agents and humans. The package separates reusable recording primitives from project-specific demo steps, so an agent can inspect a project, write a small `record_demo.py`, react to CLI output, and produce an MP4 with burned subtitles.
 
-The current backend targets Windows first and uses the installed `ffmpeg` and `ffprobe` executables for screen capture, encoding, probing, and subtitle burn-in. The Python API is structured so macOS and Linux capture backends can be added later.
+The built-in backend uses the installed `ffmpeg` and `ffprobe` executables for screen capture, encoding, probing, and subtitle burn-in. Windows capture uses `gdigrab`; macOS capture uses `avfoundation`. Linux capture is not implemented yet.
 
 ## Install
 
-```powershell
+```bash
 uv sync
 ```
 
 External tools required for recording:
 
-```powershell
+```bash
 ffmpeg -version
 ffprobe -version
 ```
+
+On macOS, high-quality burned subtitles require an `ffmpeg` build with the `subtitles` filter, which depends on `libass`. The default Homebrew `ffmpeg` formula does not include it. Install a libass-enabled build such as `ffmpeg-full`, then put it on `PATH`:
+
+```bash
+brew install ffmpeg-full
+export PATH="/opt/homebrew/opt/ffmpeg-full/bin:$PATH"
+ffmpeg -hide_banner -filters | rg subtitles
+```
+
+On macOS, the first real recording attempt may require granting Screen Recording permission to Terminal, iTerm, or the Python host (IDE, VS Code) you run the script from. You can preflight that prompt without recording by running `uv run python mac_request_access.py`. Add `--new-window` to check Terminal.app specifically.
 
 ## Quick Start
 
 Record the bundled CLI example:
 
-```powershell
+```bash
 uv run python record.py --new-window
 ```
+
+On macOS, `record.py` defaults to `--check-access`, which requests Screen Recording permission before capture starts and stops early if access is still denied.
 
 The example app lives in `examples/guessing_game.py`; the recording script is `examples/record_guessing_game.py`.
 The example intentionally uses a random secret number, so the recorder reads the app output and chooses guesses from the hints instead of replaying fixed inputs.
@@ -82,7 +94,7 @@ Useful methods:
 - `show_explanation("...")`: adds narration subtitles and waits long enough to read them.
 - `stop_recording()`: stops capture, trims subtitles to video duration, and burns subtitles into the final MP4.
 
-When `new_window=True` is used, worker stdout and stderr are also mirrored to `out/<name>.worker.log`. If the worker fails, the parent process prints the log tail so the recording script is easier to debug.
+When `new_window=True` is used, the recorder re-runs the script in a dedicated terminal session. On Windows it opens a new console; on macOS it opens a new Terminal.app window and captures that window instead of the whole display when bounds are available. Worker stdout and stderr are also mirrored to `out/<name>.worker.log`. If the worker fails, the parent process prints the log tail so the recording script is easier to debug.
 
 ## GUI or App Window API
 
@@ -117,6 +129,6 @@ See `AGENT.md` for instructions aimed at coding agents. The intended flow is:
 
 Build locally with:
 
-```powershell
+```bash
 uv build
 ```

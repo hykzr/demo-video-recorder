@@ -10,11 +10,16 @@ from demo_video_recorder.errors import (
     RecordingError,
     WindowNotFoundError,
 )
+from demo_video_recorder.macos import (
+    ScreenRecordingAccessResult,
+    check_screen_recording_access,
+)
 from demo_video_recorder.types import CaptureRegion, WindowInfo
 
 __all__ = [
     "CLIDemoRecorder",
     "CaptureRegion",
+    "check_screen_recording_access",
     "DEFAULTS",
     "DemoVideoRecorder",
     "DemoVideoRecorderError",
@@ -24,6 +29,7 @@ __all__ = [
     "ProcessError",
     "RecorderDefaults",
     "RecordingError",
+    "ScreenRecordingAccessResult",
     "WindowInfo",
     "WindowNotFoundError",
 ]

@@ -219,3 +219,5 @@ __marimo__/
 
 temp/
 out/
+.DS_Store
+._*

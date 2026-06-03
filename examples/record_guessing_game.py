@@ -34,7 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--new-window",
         action="store_true",
-        help="Rerun this script in a dedicated Windows console before recording.",
+        help="Rerun this script in a dedicated terminal session before recording.",
     )
     parser.add_argument(
         "--no-record",
@@ -45,6 +45,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--fast",
         action="store_true",
         help="Use shorter pauses for quick local smoke tests.",
+    )
+    parser.add_argument(
+        "--check-access",
+        action=argparse.BooleanOptionalAction,
+        default=sys.platform == "darwin",
+        help="Check and request macOS Screen Recording access before capture starts.",
     )
     parser.add_argument(
         "--max-reopen-attempts",
@@ -138,6 +144,7 @@ def main(argv: list[str] | None = None) -> int:
             top=True,
             start_recording=not args.no_record,
             new_window=args.new_window,
+            check_access=args.check_access and not args.no_record,
         )
 
         recorder.show_explanation(

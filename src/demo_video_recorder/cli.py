@@ -5,9 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 import os
+import platform
 import re
+import shlex
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from typing import Literal, Mapping, Pattern, Sequence
@@ -17,9 +20,9 @@ from demo_video_recorder.defaults import DEFAULTS
 from demo_video_recorder.errors import ProcessError, RecordingError
 from demo_video_recorder import windowing
 
-
 _WORKER_ENV = "DEMO_VIDEO_RECORDER_TERMINAL_WORKER"
 _WORKER_LOG_ENV = "DEMO_VIDEO_RECORDER_WORKER_LOG"
+_WORKER_STATUS_TIMEOUT_SECONDS = 120.0
 OutputStream = Literal["combined", "stdout", "stderr"]
 
 
@@ -97,7 +100,7 @@ class CLIDemoRecorder(DemoVideoRecorder):
         prompt: str = "> ",
         **kwargs: object,
     ) -> None:
-        super().__init__(output_path, **kwargs) # type: ignore
+        super().__init__(output_path, **kwargs)  # type: ignore
         self.typed_character_delay = typed_character_delay
         self.command_lead_seconds = command_lead_seconds
         self.prompt = prompt
@@ -115,18 +118,34 @@ class CLIDemoRecorder(DemoVideoRecorder):
         script_path: str | Path | None = None,
         extra_args: Sequence[str] | None = None,
         wait_for_worker: bool = True,
+        check_access: bool | None = None,
+        access_timeout_seconds: float = 30.0,
     ) -> "CLIDemoRecorder":
         """Prepare the terminal window and optionally start capture.
 
-        On Windows, ``new_window=True`` re-runs the current script in a dedicated
-        console. The parent process waits for that worker and exits with the same
-        code; the worker continues through the rest of the user's script.
+        On Windows and macOS, ``new_window=True`` re-runs the current script in a
+        dedicated terminal session. The parent process waits for that worker and
+        exits with the same code; the worker continues through the rest of the
+        user's script.
         """
 
         self._install_worker_log()
 
         if new_window and os.name == "nt" and os.environ.get(_WORKER_ENV) != "1":
-            return_code = self._run_in_new_windows_console(
+            return_code = self._run_in_new_terminal_worker(
+                title=title,
+                script_path=script_path,
+                extra_args=extra_args,
+                wait=wait_for_worker,
+            )
+            raise SystemExit(return_code)
+        if (
+            new_window
+            and platform.system() == "Darwin"
+            and os.environ.get(_WORKER_ENV) != "1"
+        ):
+            return_code = self._run_in_new_terminal_worker(
+                title=title,
                 script_path=script_path,
                 extra_args=extra_args,
                 wait=wait_for_worker,
@@ -134,6 +153,7 @@ class CLIDemoRecorder(DemoVideoRecorder):
             raise SystemExit(return_code)
 
         terminal_title = title or f"Demo Video Recorder {os.getpid()}"
+        self._configure_non_windows_terminal_title(terminal_title)
         window = windowing.configure_current_console(
             title=terminal_title,
             maximize=maximize,
@@ -142,6 +162,15 @@ class CLIDemoRecorder(DemoVideoRecorder):
         if window is not None:
             self.capture_window = window
             self.capture_region = window.region
+
+        if check_access is None:
+            check_access = platform.system() == "Darwin" and start_recording
+        if check_access:
+            self.ensure_screen_recording_access(
+                prompt=True,
+                timeout_seconds=access_timeout_seconds,
+                print_status=True,
+            )
 
         if start_recording:
             self.start_recording(region=self.capture_region)
@@ -163,7 +192,9 @@ class CLIDemoRecorder(DemoVideoRecorder):
         """Run a command, streaming output into the recorded terminal."""
 
         if self.active_process is not None:
-            raise ProcessError("A CLI process is already active. Call stop_app() first.")
+            raise ProcessError(
+                "A CLI process is already active. Call stop_app() first."
+            )
 
         label = command_label or self._command_to_label(command)
         if reveal_command:
@@ -208,7 +239,9 @@ class CLIDemoRecorder(DemoVideoRecorder):
         if check and return_code != 0:
             output = managed.text("combined").strip()
             detail = f"\n\nOutput:\n{output}" if output else ""
-            raise ProcessError(f"Command exited with code {return_code}: {label}{detail}")
+            raise ProcessError(
+                f"Command exited with code {return_code}: {label}{detail}"
+            )
         return return_code
 
     def input(
@@ -259,7 +292,9 @@ class CLIDemoRecorder(DemoVideoRecorder):
             stderr=managed.length("stderr"),
         )
 
-    def output_since(self, marker: OutputMarkerLike, stream: OutputStream = "combined") -> str:
+    def output_since(
+        self, marker: OutputMarkerLike, stream: OutputStream = "combined"
+    ) -> str:
         """Return captured output after a checkpoint."""
 
         return self.output_text(stream)[self._marker_position(marker, stream) :]
@@ -274,7 +309,10 @@ class CLIDemoRecorder(DemoVideoRecorder):
         """Check whether captured output contains text."""
 
         managed = self._require_known_process()
-        return any(text in candidate for candidate in self._output_candidates(managed, stream, since))
+        return any(
+            text in candidate
+            for candidate in self._output_candidates(managed, stream, since)
+        )
 
     def wait_for_output(
         self,
@@ -290,10 +328,14 @@ class CLIDemoRecorder(DemoVideoRecorder):
         deadline = time.monotonic() + timeout_seconds
 
         while time.monotonic() < deadline:
-            if any(text in candidate for candidate in self._output_candidates(managed, stream, since)):
+            if any(
+                text in candidate
+                for candidate in self._output_candidates(managed, stream, since)
+            ):
                 return self
             if managed.process.poll() is not None and any(
-                text in candidate for candidate in self._output_candidates(managed, stream, since)
+                text in candidate
+                for candidate in self._output_candidates(managed, stream, since)
             ):
                 return self
             time.sleep(0.05)
@@ -312,7 +354,9 @@ class CLIDemoRecorder(DemoVideoRecorder):
     ) -> str:
         """Wait for text and return the matching output window."""
 
-        self.wait_for_output(text, timeout_seconds=timeout_seconds, stream=stream, since=since)
+        self.wait_for_output(
+            text, timeout_seconds=timeout_seconds, stream=stream, since=since
+        )
         return self.output_since(since, stream)
 
     def wait_for_regex(
@@ -344,7 +388,9 @@ class CLIDemoRecorder(DemoVideoRecorder):
 
         captured = self.output_since(since, stream).strip()
         detail = f"\n\nCaptured {stream} output:\n{captured}" if captured else ""
-        raise ProcessError(f"Timed out waiting for CLI regex: {compiled.pattern!r}{detail}")
+        raise ProcessError(
+            f"Timed out waiting for CLI regex: {compiled.pattern!r}{detail}"
+        )
 
     def expect_regex(
         self,
@@ -398,33 +444,197 @@ class CLIDemoRecorder(DemoVideoRecorder):
         self.stop_app()
         super().close()
 
-    def _run_in_new_windows_console(
+    def _run_in_new_terminal_worker(
         self,
         *,
+        title: str | None,
         script_path: str | Path | None,
         extra_args: Sequence[str] | None,
         wait: bool,
     ) -> int:
+        system = platform.system()
+        if system == "Windows":
+            return self._run_in_new_windows_console(
+                title=title,
+                script_path=script_path,
+                extra_args=extra_args,
+                wait=wait,
+            )
+        if system == "Darwin":
+            return self._run_in_new_macos_terminal(
+                title=title,
+                script_path=script_path,
+                extra_args=extra_args,
+                wait=wait,
+            )
+        raise RecordingError(
+            f"new_window=True is currently implemented for Windows and macOS only, not {system}."
+        )
+
+    def _run_in_new_windows_console(
+        self,
+        *,
+        title: str | None,
+        script_path: str | Path | None,
+        extra_args: Sequence[str] | None,
+        wait: bool,
+    ) -> int:
+        del title
         if os.name != "nt":
-            raise RecordingError("new_window=True is currently implemented for Windows only.")
+            raise RecordingError(
+                "Windows terminal worker requested on a non-Windows host."
+            )
 
         script = Path(script_path or sys.argv[0]).resolve()
         if not script.exists():
-            raise RecordingError(f"Cannot open terminal worker for missing script: {script}")
+            raise RecordingError(
+                f"Cannot open terminal worker for missing script: {script}"
+            )
 
-        args = [sys.executable, str(script), *(extra_args if extra_args is not None else sys.argv[1:])]
+        args = [
+            sys.executable,
+            str(script),
+            *(extra_args if extra_args is not None else sys.argv[1:]),
+        ]
         env = os.environ.copy()
         env[_WORKER_ENV] = "1"
-        env[_WORKER_LOG_ENV] = str(self.output_path.with_suffix(".worker.log").resolve())
+        env[_WORKER_LOG_ENV] = str(
+            self.output_path.with_suffix(".worker.log").resolve()
+        )
         env["PYTHONUNBUFFERED"] = "1"
         creationflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
-        process = subprocess.Popen(args, cwd=os.getcwd(), env=env, creationflags=creationflags)
+        process = subprocess.Popen(
+            args, cwd=os.getcwd(), env=env, creationflags=creationflags
+        )
         if not wait:
             return 0
         return_code = process.wait()
         if return_code != 0:
             self._print_worker_log_tail(Path(env[_WORKER_LOG_ENV]))
         return return_code
+
+    def _run_in_new_macos_terminal(
+        self,
+        *,
+        title: str | None,
+        script_path: str | Path | None,
+        extra_args: Sequence[str] | None,
+        wait: bool,
+    ) -> int:
+        script = Path(script_path or sys.argv[0]).resolve()
+        if not script.exists():
+            raise RecordingError(
+                f"Cannot open terminal worker for missing script: {script}"
+            )
+
+        args = [
+            sys.executable,
+            str(script),
+            *(extra_args if extra_args is not None else sys.argv[1:]),
+        ]
+        env = os.environ.copy()
+        env[_WORKER_ENV] = "1"
+        env[_WORKER_LOG_ENV] = str(
+            self.output_path.with_suffix(".worker.log").resolve()
+        )
+        env["PYTHONUNBUFFERED"] = "1"
+
+        status_path = self.output_path.with_suffix(".worker.status")
+        status_path.parent.mkdir(parents=True, exist_ok=True)
+        status_path.unlink(missing_ok=True)
+        launcher = self._write_macos_worker_script(
+            title=title,
+            args=args,
+            env=env,
+            cwd=Path.cwd(),
+            status_path=status_path,
+        )
+        try:
+            result = subprocess.run(
+                ["open", "-a", "Terminal", str(launcher)],
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            if result.returncode != 0:
+                detail = (result.stderr + "\n" + result.stdout).strip()
+                raise RecordingError(f"Could not launch Terminal.app worker.\n{detail}")
+
+            if not wait:
+                return 0
+
+            deadline = time.monotonic() + _WORKER_STATUS_TIMEOUT_SECONDS
+            while not status_path.exists():
+                if time.monotonic() >= deadline:
+                    self._print_worker_log_tail(Path(env[_WORKER_LOG_ENV]))
+                    raise RecordingError(
+                        "Timed out waiting for the Terminal.app worker to finish."
+                    )
+                time.sleep(0.25)
+
+            status_text = status_path.read_text(
+                encoding="utf-8", errors="replace"
+            ).strip()
+            return_code = int(status_text or "1")
+            if return_code != 0:
+                self._print_worker_log_tail(Path(env[_WORKER_LOG_ENV]))
+            return return_code
+        finally:
+            status_path.unlink(missing_ok=True)
+
+    def _write_macos_worker_script(
+        self,
+        *,
+        title: str | None,
+        args: Sequence[str],
+        env: Mapping[str, str],
+        cwd: Path,
+        status_path: Path,
+    ) -> Path:
+        fd, raw_path = tempfile.mkstemp(
+            prefix="demo-video-recorder-", suffix=".command"
+        )
+        os.close(fd)
+        script_path = Path(raw_path)
+
+        exports = [
+            f"export {key}={shlex.quote(value)}"
+            for key, value in env.items()
+            if key in {_WORKER_ENV, _WORKER_LOG_ENV, "PYTHONUNBUFFERED"}
+        ]
+        title_line = ""
+        if title:
+            safe_title = title.replace("\\", "\\\\").replace("'", "'\"'\"'")
+            title_line = f"printf '\\033]0;{safe_title}\\007'\n"
+
+        lines = [
+            "#!/bin/zsh",
+            *exports,
+            (
+                f"cd {shlex.quote(str(cwd))} || "
+                f"{{ printf '%s' '1' > {shlex.quote(str(status_path))}; exit 1; }}"
+            ),
+            title_line.rstrip("\n"),
+            f"{shlex.join([str(part) for part in args])}",
+            "exit_code=$?",
+            f"printf '%s' \"$exit_code\" > {shlex.quote(str(status_path))}",
+            'rm -f -- "$0"',
+            'exit "$exit_code"',
+        ]
+        text = "\n".join(line for line in lines if line) + "\n"
+        script_path.write_text(text, encoding="utf-8")
+        script_path.chmod(0o755)
+        return script_path
+
+    def _configure_non_windows_terminal_title(self, title: str) -> None:
+        if os.name == "nt":
+            return
+        if not title:
+            return
+        sys.stdout.write(f"\033]0;{title}\007")
+        sys.stdout.flush()
 
     def _type_line(self, text: str, *, prefix: str = "") -> None:
         sys.stdout.write("\n")
@@ -443,7 +653,11 @@ class CLIDemoRecorder(DemoVideoRecorder):
         managed: _ManagedCLIProcess,
         stream_name: OutputStream,
     ) -> None:
-        stream = managed.process.stdout if stream_name == "stdout" else managed.process.stderr
+        stream = (
+            managed.process.stdout
+            if stream_name == "stdout"
+            else managed.process.stderr
+        )
         if stream is None:
             return
 
@@ -458,7 +672,9 @@ class CLIDemoRecorder(DemoVideoRecorder):
 
     def _require_active_process(self) -> _ManagedCLIProcess:
         if self.active_process is None:
-            raise ProcessError("No active CLI app. Start one with run(..., interactive=True).")
+            raise ProcessError(
+                "No active CLI app. Start one with run(..., interactive=True)."
+            )
         return self.active_process
 
     def _require_known_process(self) -> _ManagedCLIProcess:
@@ -508,12 +724,16 @@ class CLIDemoRecorder(DemoVideoRecorder):
         sys.stdout = _Tee(sys.stdout, log_file)  # type: ignore[assignment]
         sys.stderr = _Tee(sys.stderr, log_file)  # type: ignore[assignment]
 
-    def _print_worker_log_tail(self, log_path: Path, *, max_chars: int = 12_000) -> None:
+    def _print_worker_log_tail(
+        self, log_path: Path, *, max_chars: int = 12_000
+    ) -> None:
         if not log_path.exists():
             return
 
         text = log_path.read_text(encoding="utf-8", errors="replace")
         if len(text) > max_chars:
             text = text[-max_chars:]
-        sys.stderr.write(f"\nRecording worker failed. Log tail from {log_path}:\n{text}\n")
+        sys.stderr.write(
+            f"\nRecording worker failed. Log tail from {log_path}:\n{text}\n"
+        )
         sys.stderr.flush()

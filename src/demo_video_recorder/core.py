@@ -4,16 +4,18 @@ from __future__ import annotations
 
 from pathlib import Path
 import shutil
+import platform
 import subprocess
 import time
 from typing import Mapping, Sequence
 
 from demo_video_recorder.backends import FfmpegCaptureBackend
 from demo_video_recorder.defaults import DEFAULTS
+from demo_video_recorder.errors import RecordingError
+from demo_video_recorder.macos import check_screen_recording_access
 from demo_video_recorder.subtitles import SubtitleWriter
 from demo_video_recorder.types import CaptureRegion, WindowInfo
 from demo_video_recorder import windowing
-
 
 Command = str | Sequence[str]
 
@@ -123,7 +125,9 @@ class DemoVideoRecorder:
     ) -> WindowInfo:
         """Find a visible desktop window and store it as the capture target."""
 
-        window = windowing.find_window(title, exact=exact, timeout_seconds=timeout_seconds)
+        window = windowing.find_window(
+            title, exact=exact, timeout_seconds=timeout_seconds
+        )
         if activate:
             windowing.activate_window(window.hwnd, maximize=maximize, top=top)
             time.sleep(0.2)
@@ -152,7 +156,9 @@ class DemoVideoRecorder:
 
         return self.start_recording(region=self.capture_region)
 
-    def start_recording(self, *, region: CaptureRegion | None = None) -> "DemoVideoRecorder":
+    def start_recording(
+        self, *, region: CaptureRegion | None = None
+    ) -> "DemoVideoRecorder":
         """Start screen capture and reset subtitle timing."""
 
         if region is not None:
@@ -204,6 +210,30 @@ class DemoVideoRecorder:
         """Burn the current SRT file into the raw recording."""
 
         return self.capture.burn_subtitles(self.subtitle_path, self.output_path)
+
+    def ensure_screen_recording_access(
+        self,
+        *,
+        prompt: bool = True,
+        timeout_seconds: float = 30.0,
+        print_status: bool = True,
+    ) -> bool:
+        """Check and optionally request macOS Screen Recording permission."""
+
+        result = check_screen_recording_access(
+            prompt=prompt,
+            timeout_seconds=timeout_seconds,
+        )
+        if print_status and platform.system() == "Darwin":
+            print(f"Screen recording access status: {result.status}")
+
+        if result.granted:
+            return True
+
+        raise RecordingError(
+            "Screen recording access was not granted for this app. "
+            "Grant Screen Recording permission in System Settings, then rerun the command."
+        )
 
     def close(self) -> None:
         """Close child applications and finish the current subtitle cue."""
