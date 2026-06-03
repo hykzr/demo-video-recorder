@@ -170,7 +170,7 @@ class DemoVideoRecorder:
         self.subtitles.start_clock()
         return self
 
-    def show_explanation(self, text: str, *, wait: bool = True) -> "DemoVideoRecorder":
+    def explain(self, text: str, *, wait: bool = True) -> "DemoVideoRecorder":
         """Add narration text that will be burned as subtitles."""
 
         self.subtitles.add_cue(text, wait=wait)

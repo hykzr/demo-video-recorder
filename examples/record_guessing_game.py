@@ -13,7 +13,6 @@ from demo_video_recorder import (
     ProcessError,
 )
 
-
 ROOT = Path(__file__).resolve().parents[1]
 GAME = Path(__file__).with_name("guessing_game.py")
 OUTCOME_PATTERN = (
@@ -62,7 +61,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def open_game(recorder: CLIDemoRecorder, *, label: str) -> tuple[int, int]:
-    recorder.show_explanation(label)
+    recorder.explain(label)
     recorder.run(
         [sys.executable, str(GAME)],
         interactive=True,
@@ -85,21 +84,23 @@ def play_by_feedback(recorder: CLIDemoRecorder, low: int, high: int) -> int:
         guess = (low + high) // 2
         attempts += 1
         if attempts == 1:
-            recorder.show_explanation(
+            recorder.explain(
                 f"I'm starting in the middle with {guess}. No peeking at the answer, just reading the hints."
             )
         elif low == high:
-            recorder.show_explanation(
+            recorder.explain(
                 f"The hints have narrowed it down to {guess}, so this should be the one."
             )
         else:
-            recorder.show_explanation(
+            recorder.explain(
                 f"That trims the search to {low} through {high}. Best next guess is {guess}."
             )
 
         marker = recorder.mark_output()
         recorder.input(str(guess))
-        outcome = recorder.expect_regex(OUTCOME_PATTERN, since=marker, timeout_seconds=5)
+        outcome = recorder.expect_regex(
+            OUTCOME_PATTERN, since=marker, timeout_seconds=5
+        )
 
         if outcome.group("low"):
             low = guess + 1
@@ -112,7 +113,7 @@ def play_by_feedback(recorder: CLIDemoRecorder, low: int, high: int) -> int:
             continue
 
         recorder.expect_output("Thanks for playing.", since=marker, timeout_seconds=5)
-        recorder.show_explanation(
+        recorder.explain(
             f"And there we go: it was {guess}. The recorder got there by reacting to the app output."
         )
         recorder.stop_app()
@@ -134,7 +135,7 @@ def main(argv: list[str] | None = None) -> int:
 
     recorder = CLIDemoRecorder(
         args.output,
-        **settings.recorder_kwargs(), # type: ignore
+        **settings.recorder_kwargs(),  # type: ignore
         keep_raw=False,
     )
 
@@ -147,7 +148,7 @@ def main(argv: list[str] | None = None) -> int:
             check_access=args.check_access and not args.no_record,
         )
 
-        recorder.show_explanation(
+        recorder.explain(
             "Let's do this like a real little live demo: the game picks randomly, and I'll figure it out from the clues."
         )
         first_answer = play_one_game(
@@ -155,7 +156,7 @@ def main(argv: list[str] | None = None) -> int:
             launch_message="First run. I'll open the game and let it choose whatever number it wants.",
         )
 
-        recorder.show_explanation(
+        recorder.explain(
             "Now I'm going to reopen the CLI app. The goal is to prove a new run starts fresh."
         )
         for attempt in range(1, args.max_reopen_attempts + 1):
@@ -164,12 +165,12 @@ def main(argv: list[str] | None = None) -> int:
                 launch_message=f"Reopen attempt {attempt}: fresh process, fresh random pick.",
             )
             if second_answer != first_answer:
-                recorder.show_explanation(
+                recorder.explain(
                     f"Nice, this time it picked {second_answer} instead of {first_answer}. Reopen behavior checked."
                 )
                 break
 
-            recorder.show_explanation(
+            recorder.explain(
                 f"Oops, it rolled {second_answer} again. Randomness is allowed to be boring; I'll reopen once more."
             )
         else:
@@ -177,7 +178,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"The game repeated {first_answer} for {args.max_reopen_attempts} reopen attempts."
             )
 
-        recorder.show_explanation(
+        recorder.explain(
             "That's the demo: random app behavior, output-aware guesses, and a clean reopen check."
         )
     finally:
