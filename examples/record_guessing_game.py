@@ -23,7 +23,7 @@ OUTCOME_PATTERN = (
     r"(?P<won>You got it in (?P<attempts>\d+) guesses\.)"
 )
 MAX_REOPEN_ATTEMPTS = 10
-DEFAULT_WINDOW_SIZE = (1200, 1200)
+DEFAULT_WINDOW_SIZE = (1400, 1000)
 
 
 def default_output_path(*, audio_only: bool) -> Path:
@@ -48,7 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=parse_window_size,
         default=DEFAULT_WINDOW_SIZE,
         metavar="WIDTHxHEIGHT",
-        help="Terminal window size in pixels. Defaults to 1200x1200.",
+        help="Terminal window size in pixels. Defaults to 1400x1000.",
     )
     parser.add_argument(
         "--no-record",
@@ -72,7 +72,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--tts-speaker",
-        default="en-US-JennyNeural",
+        default="en-US-AvaNeural",
         help="Edge TTS speaker/voice name.",
     )
     parser.add_argument(
@@ -126,9 +126,7 @@ def parse_window_size(value: str) -> tuple[int, int]:
         ) from exc
 
     if width <= 0 or height <= 0:
-        raise argparse.ArgumentTypeError(
-            "window size values must be positive integers"
-        )
+        raise argparse.ArgumentTypeError("window size values must be positive integers")
     return (width, height)
 
 

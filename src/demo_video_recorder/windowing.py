@@ -17,7 +17,10 @@ import sys
 import time
 
 from demo_video_recorder.errors import WindowNotFoundError
-from demo_video_recorder.macos import get_display_scale_factor_for_rect
+from demo_video_recorder.macos import (
+    get_display_bounds_for_rect,
+    get_display_scale_factor_for_rect,
+)
 from demo_video_recorder.types import CaptureRegion, WindowInfo
 
 IS_WINDOWS = platform.system() == "Windows"
@@ -317,12 +320,22 @@ def configure_current_console(
     window_size: tuple[int, int] | None = None,
 ) -> WindowInfo | None:
     if IS_MACOS:
-        del maximize, top, window_size
         if title:
             time.sleep(0.15)
         _activate_macos_console()
         time.sleep(0.15)
-        return _wait_for_macos_console_window(title=title)
+        window = _wait_for_macos_console_window(title=title)
+        if window is None:
+            return None
+        _configure_macos_console_window(
+            window,
+            title=title,
+            maximize=maximize,
+            top=top,
+            window_size=window_size,
+        )
+        time.sleep(0.15)
+        return _wait_for_macos_console_window(title=title) or window
 
     if not IS_WINDOWS:
         return None
@@ -365,6 +378,82 @@ def _activate_macos_console() -> None:
     if app_name is None:
         return
     _run_osascript([f'tell application "{app_name}" to activate'])
+
+
+def _configure_macos_console_window(
+    window: WindowInfo,
+    *,
+    title: str | None,
+    maximize: bool,
+    top: bool,
+    window_size: tuple[int, int] | None,
+) -> None:
+    del top
+
+    target_bounds = _fit_macos_window_bounds(
+        window.region,
+        maximize=maximize,
+        window_size=window_size,
+    )
+    if target_bounds is None:
+        return
+
+    scale = get_display_scale_factor_for_rect(
+        target_bounds.left,
+        target_bounds.top,
+        target_bounds.left + target_bounds.width,
+        target_bounds.top + target_bounds.height,
+    )
+    current_bounds = _macos_pixel_region_to_points(window.region, scale)
+    if current_bounds == target_bounds:
+        return
+
+    _set_macos_console_window_bounds(target_bounds, title=title)
+
+
+def _fit_macos_window_bounds(
+    region: CaptureRegion,
+    *,
+    maximize: bool,
+    window_size: tuple[int, int] | None,
+) -> CaptureRegion | None:
+    scale = get_display_scale_factor_for_rect(
+        region.left,
+        region.top,
+        region.left + region.width,
+        region.top + region.height,
+    )
+    current_bounds = _macos_pixel_region_to_points(region, scale)
+    screen = get_display_bounds_for_rect(
+        current_bounds.left,
+        current_bounds.top,
+        current_bounds.left + current_bounds.width,
+        current_bounds.top + current_bounds.height,
+    )
+    if screen is None:
+        return None
+
+    preferred_size: tuple[int, int] | None = None
+    if window_size is not None:
+        preferred_size = (
+            max(int(round(window_size[0] / scale)), 1),
+            max(int(round(window_size[1] / scale)), 1),
+        )
+    elif maximize:
+        preferred_size = (screen.width, screen.height)
+
+    return fit_region_in_screen(current_bounds, screen, preferred_size=preferred_size)
+
+
+def _macos_pixel_region_to_points(
+    region: CaptureRegion, scale: float
+) -> CaptureRegion:
+    return CaptureRegion(
+        int(round(region.left / scale)),
+        int(round(region.top / scale)),
+        max(int(round(region.width / scale)), 1),
+        max(int(round(region.height / scale)), 1),
+    )
 
 
 def _get_macos_console_window() -> WindowInfo | None:
@@ -524,6 +613,106 @@ def _macos_front_window_query_lines(app_name: str) -> list[str]:
         "set frontBounds to bounds of front window",
         "set windowName to name of front window",
         'return windowName & "|" & (item 1 of frontBounds as text) & "|" & (item 2 of frontBounds as text) & "|" & (item 3 of frontBounds as text) & "|" & (item 4 of frontBounds as text)',
+        "end tell",
+    ]
+
+
+def _set_macos_console_window_bounds(
+    bounds: CaptureRegion,
+    *,
+    title: str | None = None,
+) -> None:
+    app_name = _macos_terminal_app_name()
+    if app_name is None:
+        return
+
+    tty_path = _current_tty_path()
+    queries: list[list[str]] = []
+    if tty_path:
+        queries.append(
+            _macos_set_window_bounds_lines(app_name, bounds, tty_path=tty_path)
+        )
+    if title:
+        queries.append(_macos_set_window_bounds_lines(app_name, bounds, title=title))
+    queries.append(_macos_set_window_bounds_lines(app_name, bounds))
+
+    for query in queries:
+        if _run_osascript(query):
+            return
+
+
+def _macos_set_window_bounds_lines(
+    app_name: str,
+    bounds: CaptureRegion,
+    *,
+    tty_path: str | None = None,
+    title: str | None = None,
+) -> list[str]:
+    bounds_list = (
+        "{"
+        f"{bounds.left}, {bounds.top}, "
+        f"{bounds.left + bounds.width}, {bounds.top + bounds.height}"
+        "}"
+    )
+    if tty_path:
+        if app_name == "iTerm":
+            return [
+                f"set targetTty to {_applescript_string(tty_path)}",
+                f"set targetBounds to {bounds_list}",
+                f'tell application "{app_name}"',
+                'if (count of windows) = 0 then return ""',
+                "repeat with aWindow in windows",
+                "repeat with aTab in tabs of aWindow",
+                "repeat with aSession in sessions of aTab",
+                "if tty of aSession is equal to targetTty then",
+                "set bounds of aWindow to targetBounds",
+                'return "ok"',
+                "end if",
+                "end repeat",
+                "end repeat",
+                "end repeat",
+                'return ""',
+                "end tell",
+            ]
+        return [
+            f"set targetTty to {_applescript_string(tty_path)}",
+            f"set targetBounds to {bounds_list}",
+            f'tell application "{app_name}"',
+            'if (count of windows) = 0 then return ""',
+            "repeat with aWindow in windows",
+            "repeat with aTab in tabs of aWindow",
+            "if tty of aTab is equal to targetTty then",
+            "set bounds of aWindow to targetBounds",
+            'return "ok"',
+            "end if",
+            "end repeat",
+            "end repeat",
+            'return ""',
+            "end tell",
+        ]
+
+    if title is None:
+        return [
+            f"set targetBounds to {bounds_list}",
+            f'tell application "{app_name}"',
+            'if (count of windows) = 0 then return ""',
+            "set bounds of front window to targetBounds",
+            'return "ok"',
+            "end tell",
+        ]
+
+    return [
+        f"set targetTitle to {_applescript_string(title)}",
+        f"set targetBounds to {bounds_list}",
+        f'tell application "{app_name}"',
+        'if (count of windows) = 0 then return ""',
+        "repeat with aWindow in windows",
+        "if name of aWindow is equal to targetTitle then",
+        "set bounds of aWindow to targetBounds",
+        'return "ok"',
+        "end if",
+        "end repeat",
+        'return ""',
         "end tell",
     ]
 

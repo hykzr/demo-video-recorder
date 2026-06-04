@@ -8,6 +8,8 @@ import ctypes
 import platform
 import time
 
+from demo_video_recorder.types import CaptureRegion
+
 IS_MACOS = platform.system() == "Darwin"
 
 
@@ -115,6 +117,38 @@ def get_display_scale_factor_for_rect(
     if library is None:
         return 1.0
 
+    best_display = _display_id_for_rect(library, left, top, right, bottom)
+    return _display_mode_scale_factor(library, best_display)
+
+
+def get_display_bounds_for_rect(
+    left: float,
+    top: float,
+    right: float,
+    bottom: float,
+) -> CaptureRegion | None:
+    library = _core_graphics()
+    if library is None:
+        return None
+
+    bounds = library.CGDisplayBounds(
+        _display_id_for_rect(library, left, top, right, bottom)
+    )
+    return CaptureRegion(
+        int(round(bounds.origin.x)),
+        int(round(bounds.origin.y)),
+        max(int(round(bounds.size.width)), 1),
+        max(int(round(bounds.size.height)), 1),
+    )
+
+
+def _display_id_for_rect(
+    library: ctypes.CDLL,
+    left: float,
+    top: float,
+    right: float,
+    bottom: float,
+) -> int:
     max_displays = 32
     display_ids = (ctypes.c_uint32 * max_displays)()
     display_count = ctypes.c_uint32()
@@ -124,12 +158,12 @@ def get_display_scale_factor_for_rect(
         ctypes.byref(display_count),
     )
     if error != 0 or display_count.value <= 0:
-        return get_main_display_scale_factor()
+        return int(library.CGMainDisplayID())
 
-    best_display = library.CGMainDisplayID()
+    best_display = int(library.CGMainDisplayID())
     best_overlap = -1.0
     for index in range(display_count.value):
-        display_id = display_ids[index]
+        display_id = int(display_ids[index])
         bounds = library.CGDisplayBounds(display_id)
         overlap = _overlap_area(
             left,
@@ -145,7 +179,7 @@ def get_display_scale_factor_for_rect(
             best_display = display_id
             best_overlap = overlap
 
-    return _display_mode_scale_factor(library, best_display)
+    return best_display
 
 
 def _overlap_area(

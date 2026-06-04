@@ -85,7 +85,7 @@ from demo_video_recorder import EdgeTTSBackend
 def main():
     tts = EdgeTTSBackend(
         save_dir="out/demo.tts",
-        speaker="en-US-JennyNeural",
+        speaker="en-US-AvaNeural",
         speed="+0%",
         volume="+0%",
     )
@@ -132,6 +132,12 @@ Useful methods:
 - `render_narration_audio()`: exports just the synthesized narration timeline, useful for `--audio-only` test runs.
 
 When `new_window=True` is used, the recorder re-runs the script in a dedicated terminal session. On Windows it opens a new console; on macOS it opens a new Terminal.app window and captures that window instead of the whole display when bounds are available. Worker stdout and stderr are also mirrored to `out/<name>.worker.log`. If the worker fails, the parent process prints the log tail so the recording script is easier to debug.
+
+Platform notes for terminal window control:
+
+- Windows supports `maximize`, `top=True`, and `window_size=(w, h)` for the recorder-managed console window.
+- macOS now applies `maximize` and `window_size=(w, h)` as a best-effort resize for Terminal.app and iTerm windows by scripting their window bounds.
+- macOS does not currently support persistent `top=True` / always-on-top behavior. The recorder can bring the terminal to the front, but Terminal.app and iTerm do not expose a portable AppleScript API for keeping a normal window above all other apps.
 
 When TTS is enabled, `explain()` uses the real generated audio length instead of the word-count estimate. If synthesis latency could show up in the capture, pre-generate the clip and pass it straight into `explain(prepared_explanation)`. Intermediate per-line clips are removed after the final output unless `keep_tts_audio=True`.
 
