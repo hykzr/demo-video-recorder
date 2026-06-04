@@ -23,6 +23,7 @@ from demo_video_recorder.types import CaptureRegion, WindowInfo
 from demo_video_recorder import windowing
 
 Command = str | Sequence[str]
+CAPTURE_SYNC_THRESHOLD_SECONDS = 0.05
 
 
 class DemoVideoRecorder:
@@ -250,11 +251,14 @@ class DemoVideoRecorder:
         """Stop capture and return the final video path."""
 
         self.subtitles.complete_cue()
+        timeline_end_seconds = self.subtitles.elapsed_seconds()
         if self.capture.is_recording:
             self.capture.stop()
 
         if self.raw_video_path.exists():
-            duration = self.capture.probe_duration_seconds()
+            duration = self._align_timeline_to_capture_duration(
+                timeline_end_seconds=timeline_end_seconds,
+            )
             self.subtitles.trim_to_duration(duration)
 
         should_burn = self.burn_subtitles_by_default if burn is None else burn
@@ -378,3 +382,17 @@ class DemoVideoRecorder:
             return
         self.tts.cleanup()
         self.narration_audio_path.unlink(missing_ok=True)
+
+    def _align_timeline_to_capture_duration(
+        self,
+        *,
+        timeline_end_seconds: float,
+    ) -> float:
+        duration_seconds = self.capture.probe_duration_seconds()
+
+        lag_seconds = duration_seconds - max(timeline_end_seconds, 0.0)
+        if lag_seconds <= CAPTURE_SYNC_THRESHOLD_SECONDS:
+            return duration_seconds
+
+        self.capture.trim_leading_seconds(lag_seconds)
+        return self.capture.probe_duration_seconds()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 import subprocess
 
 import pytest
@@ -99,7 +100,9 @@ def test_burn_subtitles_uses_homebrew_ffmpeg_full_when_available(
 
     monkeypatch.setattr(backend, "_ffmpeg_has_filter", fake_has_filter)
 
-    def fake_burn(*, subtitle_path, output_path, ffmpeg_binary, audio_path=None) -> None:
+    def fake_burn(
+        *, subtitle_path, output_path, ffmpeg_binary, audio_path=None
+    ) -> None:
         called["subtitle_path"] = subtitle_path
         called["output_path"] = output_path
         called["ffmpeg_binary"] = ffmpeg_binary
@@ -193,7 +196,9 @@ def test_render_narration_audio_builds_delayed_mix_command(
 
     monkeypatch.setattr(backend, "ensure_available", lambda: None)
 
-    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+    def fake_run(
+        command: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
         captured["command"] = command
         return subprocess.CompletedProcess(command, 0, "", "")
 
@@ -211,6 +216,38 @@ def test_render_narration_audio_builds_delayed_mix_command(
     assert "[0:a]adelay=0:all=1[a0]" in filter_graph
     assert "[1:a]adelay=1250:all=1[a1]" in filter_graph
     assert "amix=inputs=2:normalize=0[aout]" in filter_graph
+
+
+def test_trim_leading_seconds_reencodes_and_replaces_raw_video(
+    tmp_path, monkeypatch
+) -> None:
+    raw_video = tmp_path / "demo.raw.mp4"
+    raw_video.write_bytes(b"raw")
+    backend = FfmpegCaptureBackend(raw_video, ffmpeg="ffmpeg-test")
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(backend, "ensure_available", lambda: None)
+
+    def fake_run(
+        command: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        captured["command"] = command
+        trimmed_output = Path(command[-1])
+        trimmed_output.write_bytes(b"trimmed")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr("demo_video_recorder.backends.subprocess.run", fake_run)
+
+    output_path = backend.trim_leading_seconds(0.8)
+
+    assert output_path == raw_video
+    assert raw_video.read_bytes() == b"trimmed"
+    command = captured["command"]
+    assert isinstance(command, list)
+    assert command[:5] == ["ffmpeg-test", "-y", "-hide_banner", "-loglevel", "error"]
+    assert command[command.index("-ss") + 1] == "0.800000"
+    assert command[command.index("-map") + 1] == "0:v:0"
+    assert str(raw_video.resolve()) in command
 
 
 def test_subtitles_filter_value_quotes_filename(tmp_path) -> None:

@@ -93,6 +93,32 @@ def test_open_terminal_new_window_launches_macos_terminal(
     launcher.unlink(missing_ok=True)
 
 
+def test_open_terminal_preclears_before_starting_capture_on_macos(
+    tmp_path, monkeypatch
+) -> None:
+    recorder = CLIDemoRecorder(tmp_path / "demo.mp4", typed_character_delay=0)
+    events: list[str] = []
+
+    monkeypatch.setattr(
+        "demo_video_recorder.cli.windowing.configure_current_console",
+        lambda **kwargs: None,
+    )
+    monkeypatch.setattr(recorder, "_install_worker_log", lambda: None)
+    monkeypatch.setattr(
+        recorder, "_configure_non_windows_terminal_title", lambda _: None
+    )
+    monkeypatch.setattr(recorder, "clear", lambda: events.append("clear") or recorder)
+    monkeypatch.setattr(
+        recorder,
+        "start_recording",
+        lambda *, region=None: events.append("start") or recorder,
+    )
+
+    recorder.open_terminal(start_recording=True, clear=True, check_access=False)
+
+    assert events == ["clear", "start"]
+
+
 def test_cli_tts_flow_writes_final_subtitles_and_cleans_up(
     tmp_path, monkeypatch
 ) -> None:
@@ -285,9 +311,7 @@ def test_open_terminal_passes_custom_window_size_to_windowing(
     assert recorder.capture_region == CaptureRegion(10, 20, 800, 600)
 
 
-def test_open_terminal_clears_after_setup_and_recording(
-    tmp_path, monkeypatch
-) -> None:
+def test_open_terminal_clears_after_setup_and_recording(tmp_path, monkeypatch) -> None:
     recorder = CLIDemoRecorder(tmp_path / "demo.mp4", typed_character_delay=0)
     events: list[str] = []
 
@@ -315,8 +339,8 @@ def test_open_terminal_clears_after_setup_and_recording(
     assert events == [
         "configure",
         "check_access",
-        "start_recording",
         "clear",
+        "start_recording",
     ]
 
 

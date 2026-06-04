@@ -170,6 +170,60 @@ class FfmpegCaptureBackend:
             raise RecordingError(f"Invalid ffprobe duration: {duration}")
         return duration
 
+    def trim_leading_seconds(self, offset_seconds: float) -> Path:
+        """Trim a leading offset from the raw capture in place."""
+
+        if offset_seconds <= 0:
+            return self.raw_video_path
+
+        self.ensure_available()
+        trimmed_path = self.raw_video_path.with_name(
+            f"{self.raw_video_path.stem}.trimmed{self.raw_video_path.suffix}"
+        )
+        command = [
+            self.ffmpeg,
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(self.raw_video_path.resolve()),
+            "-ss",
+            f"{offset_seconds:.6f}",
+            "-map",
+            "0:v:0",
+            "-map",
+            "0:a?",
+            "-c:v",
+            "libx264",
+            "-preset",
+            self.preset,
+            "-crf",
+            str(self.crf),
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-movflags",
+            "+faststart",
+            str(trimmed_path.resolve()),
+        ]
+        result = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        if result.returncode != 0:
+            detail = (result.stderr + "\n" + result.stdout).strip()
+            trimmed_path.unlink(missing_ok=True)
+            raise RecordingError(f"ffmpeg leading trim failed.\n{detail}")
+
+        trimmed_path.replace(self.raw_video_path)
+        return self.raw_video_path
+
     def burn_subtitles(
         self,
         subtitle_path: str | Path,

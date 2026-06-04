@@ -4,6 +4,8 @@ from pathlib import Path
 import subprocess
 import types
 
+import pytest
+
 from demo_video_recorder import DemoVideoRecorder, EdgeTTSBackend, TTSBackend
 from demo_video_recorder.subtitles import CueDisplay
 from demo_video_recorder.tts import (
@@ -175,3 +177,81 @@ def test_stop_recording_renders_and_cleans_up_tts_audio(tmp_path) -> None:
     assert called["audio_path"] == recorder.narration_audio_path
     assert tts.cleaned is True
     assert recorder.narration_audio_path.exists() is False
+
+
+def test_stop_recording_trims_macos_capture_lead_in_to_match_timeline(
+    tmp_path, monkeypatch
+) -> None:
+    class FakeTTS(TTSBackend):
+        def __init__(self) -> None:
+            super().__init__(save_dir=tmp_path / "tts")
+            self.cleaned = False
+
+        def save_audio(self, text: str) -> Path:
+            raise AssertionError(f"unexpected save_audio call: {text}")
+
+        def cleanup(self) -> None:
+            self.cleaned = True
+
+    tts = FakeTTS()
+    recorder = DemoVideoRecorder(tmp_path / "demo.mp4", tts=tts)
+    recorder.subtitle_path.write_text(
+        "1\n" "00:00:01,000 --> 00:00:02,000\n" "Hello there\n",
+        encoding="utf-8",
+    )
+    clip_path = tmp_path / "tts" / "clip-0001.mp3"
+    clip_path.parent.mkdir(parents=True, exist_ok=True)
+    clip_path.write_bytes(b"clip")
+    recorder._narration_clips = [
+        NarrationClip(
+            text="Hello there",
+            path=clip_path,
+            start_seconds=1.0,
+            duration_seconds=1.0,
+        )
+    ]
+    recorder.raw_video_path.write_bytes(b"raw")
+
+    render_calls: dict[str, object] = {}
+    burned: dict[str, object] = {}
+    trimmed: list[float] = []
+    probe_calls = 0
+
+    monkeypatch.setattr("demo_video_recorder.core.platform.system", lambda: "Darwin")
+    monkeypatch.setattr(recorder.subtitles, "complete_cue", lambda: None)
+    monkeypatch.setattr(recorder.subtitles, "elapsed_seconds", lambda: 5.0)
+    recorder.capture.probe_duration_seconds = lambda media_path=None: 5.8 if not trimmed else 5.0  # type: ignore[method-assign]
+    recorder.capture.trim_leading_seconds = lambda offset_seconds: trimmed.append(offset_seconds) or recorder.raw_video_path  # type: ignore[method-assign]
+    recorder.capture.render_narration_audio = lambda clips, output_path: render_calls.update(  # type: ignore[method-assign]
+        {
+            "clips": clips,
+            "output_path": Path(output_path),
+        }
+    ) or Path(
+        output_path
+    )
+    recorder.capture.burn_subtitles = lambda subtitle_path, output_path, *, audio_path=None: burned.update(
+        {
+            "subtitle_path": Path(subtitle_path),
+            "output_path": Path(output_path),
+            "audio_path": Path(audio_path) if audio_path is not None else None,
+        }
+    ) or Path(
+        output_path
+    )  # type: ignore[method-assign]
+
+    final_path = recorder.stop_recording()
+
+    assert final_path == tmp_path / "demo.mp4"
+    assert trimmed == [pytest.approx(0.8)]
+    assert recorder.subtitle_path.read_text(encoding="utf-8") == (
+        "1\n" "00:00:01,000 --> 00:00:02,000\n" "Hello there\n"
+    )
+    clips = render_calls["clips"]
+    assert isinstance(clips, list)
+    assert clips[0].text == "Hello there"
+    assert clips[0].path == clip_path
+    assert clips[0].start_seconds == 1.0
+    assert clips[0].duration_seconds == 1.0
+    assert burned["audio_path"] == recorder.narration_audio_path
+    assert tts.cleaned is True

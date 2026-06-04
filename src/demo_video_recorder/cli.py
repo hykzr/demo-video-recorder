@@ -164,10 +164,10 @@ class CLIDemoRecorder(DemoVideoRecorder):
                 print_status=True,
             )
 
+        if start_recording and clear:
+            self.clear()
         if start_recording:
             self.start_recording(region=self.capture_region)
-        if clear:
-            self.clear()
         return self
 
     def clear(self) -> "CLIDemoRecorder":
