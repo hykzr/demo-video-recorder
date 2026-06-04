@@ -174,19 +174,26 @@ class DemoVideoRecorder:
         return self.start_recording(region=self.capture_region)
 
     def start_recording(
-        self, *, region: CaptureRegion | None = None
+        self,
+        *,
+        region: CaptureRegion | None = None,
+        clear: bool = False,
     ) -> "DemoVideoRecorder":
         """Start screen capture and reset subtitle timing."""
 
         if region is not None:
             self.capture_region = region
 
+        self._before_start_recording(clear=clear)
         self.subtitles.reset_file()
         self._narration_clips = []
         self.capture.start(region=self.capture_region)
         self.capture.wait_until_ready()
         self.subtitles.start_clock()
         return self
+
+    def _before_start_recording(self, *, clear: bool) -> None:
+        del clear
 
     def explain(
         self,

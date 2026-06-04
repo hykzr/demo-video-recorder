@@ -164,10 +164,8 @@ class CLIDemoRecorder(DemoVideoRecorder):
                 print_status=True,
             )
 
-        if start_recording and clear:
-            self.clear()
         if start_recording:
-            self.start_recording(region=self.capture_region)
+            self.start_recording(region=self.capture_region, clear=clear)
         return self
 
     def clear(self) -> "CLIDemoRecorder":
@@ -178,6 +176,18 @@ class CLIDemoRecorder(DemoVideoRecorder):
             sys.stdout.write("\033[2J\033[H")
             sys.stdout.flush()
         return self
+
+    def _before_start_recording(self, *, clear: bool) -> None:
+        if platform.system() == "Darwin":
+            windowing.make_macos_console_background_opaque(
+                title=(
+                    self.capture_window.title
+                    if self.capture_window is not None
+                    else None
+                )
+            )
+        if clear:
+            self.clear()
 
     def run(
         self,

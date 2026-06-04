@@ -176,6 +176,31 @@ def test_configure_current_console_maximize_uses_display_bounds_on_macos(
     assert any("set targetBounds to {0, 0, 960, 540}" in script for script in captured)
 
 
+def test_make_macos_console_background_opaque_targets_terminal_tab_by_tty(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(windowing, "IS_MACOS", True)
+    monkeypatch.setattr(windowing, "_macos_terminal_app_name", lambda: "Terminal")
+    monkeypatch.setattr(windowing, "_current_tty_path", lambda: "/dev/ttys123")
+
+    captured: list[str] = []
+
+    def fake_osascript(lines: list[str]) -> str:
+        script = "\n".join(lines)
+        captured.append(script)
+        return "ok"
+
+    monkeypatch.setattr(windowing, "_run_osascript", fake_osascript)
+
+    result = windowing.make_macos_console_background_opaque(title="Demo")
+
+    assert result is True
+    assert len(captured) == 1
+    assert 'set targetTty to "/dev/ttys123"' in captured[0]
+    assert "set currentBackgroundColor to background color of targetTab" in captured[0]
+    assert "set background color of targetTab to currentBackgroundColor" in captured[0]
+
+
 def test_get_main_display_scale_factor_uses_display_mode_pixels(monkeypatch) -> None:
     class _FakeGraphics:
         def CGMainDisplayID(self) -> int:
@@ -214,7 +239,9 @@ def test_get_display_bounds_for_rect_uses_matching_display(monkeypatch) -> None:
         def CGMainDisplayID(self) -> int:
             return 1
 
-        def CGGetActiveDisplayList(self, _max_displays, display_ids, display_count) -> int:
+        def CGGetActiveDisplayList(
+            self, _max_displays, display_ids, display_count
+        ) -> int:
             display_ids[0] = 1
             display_ids[1] = 2
             display_count._obj.value = 2

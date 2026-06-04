@@ -380,6 +380,32 @@ def _activate_macos_console() -> None:
     _run_osascript([f'tell application "{app_name}" to activate'])
 
 
+def make_macos_console_background_opaque(*, title: str | None = None) -> bool:
+    if not IS_MACOS:
+        return False
+
+    app_name = _macos_terminal_app_name()
+    if app_name is None:
+        return False
+
+    tty_path = _current_tty_path()
+    queries: list[list[str]] = []
+    if tty_path:
+        queries.append(
+            _macos_set_window_background_opaque_lines(app_name, tty_path=tty_path)
+        )
+    if title:
+        queries.append(
+            _macos_set_window_background_opaque_lines(app_name, title=title)
+        )
+    queries.append(_macos_set_window_background_opaque_lines(app_name))
+
+    for query in queries:
+        if _run_osascript(query) == "ok":
+            return True
+    return False
+
+
 def _configure_macos_console_window(
     window: WindowInfo,
     *,
@@ -639,6 +665,123 @@ def _set_macos_console_window_bounds(
     for query in queries:
         if _run_osascript(query):
             return
+
+
+def _macos_set_window_background_opaque_lines(
+    app_name: str,
+    *,
+    tty_path: str | None = None,
+    title: str | None = None,
+) -> list[str]:
+    if app_name == "iTerm":
+        return _macos_set_iterm_background_opaque_lines(
+            tty_path=tty_path,
+            title=title,
+        )
+    return _macos_set_terminal_background_opaque_lines(
+        tty_path=tty_path,
+        title=title,
+    )
+
+
+def _macos_set_terminal_background_opaque_lines(
+    *,
+    tty_path: str | None = None,
+    title: str | None = None,
+) -> list[str]:
+    if tty_path:
+        return [
+            f"set targetTty to {_applescript_string(tty_path)}",
+            'tell application "Terminal"',
+            'if (count of windows) = 0 then return ""',
+            "repeat with aWindow in windows",
+            "repeat with aTab in tabs of aWindow",
+            "if tty of aTab is equal to targetTty then",
+            "set targetTab to aTab",
+            "set currentBackgroundColor to background color of targetTab",
+            "set background color of targetTab to currentBackgroundColor",
+            'return "ok"',
+            "end if",
+            "end repeat",
+            "end repeat",
+            'return ""',
+            "end tell",
+        ]
+
+    if title is None:
+        return [
+            'tell application "Terminal"',
+            'if (count of windows) = 0 then return ""',
+            "set targetTab to selected tab of front window",
+            "set currentBackgroundColor to background color of targetTab",
+            "set background color of targetTab to currentBackgroundColor",
+            'return "ok"',
+            "end tell",
+        ]
+
+    return [
+        f"set targetTitle to {_applescript_string(title)}",
+        'tell application "Terminal"',
+        'if (count of windows) = 0 then return ""',
+        "repeat with aWindow in windows",
+        "if name of aWindow is equal to targetTitle then",
+        "set targetTab to selected tab of aWindow",
+        "set currentBackgroundColor to background color of targetTab",
+        "set background color of targetTab to currentBackgroundColor",
+        'return "ok"',
+        "end if",
+        "end repeat",
+        'return ""',
+        "end tell",
+    ]
+
+
+def _macos_set_iterm_background_opaque_lines(
+    *,
+    tty_path: str | None = None,
+    title: str | None = None,
+) -> list[str]:
+    if tty_path:
+        return [
+            f"set targetTty to {_applescript_string(tty_path)}",
+            'tell application "iTerm"',
+            'if (count of windows) = 0 then return ""',
+            "repeat with aWindow in windows",
+            "repeat with aTab in tabs of aWindow",
+            "repeat with aSession in sessions of aTab",
+            "if tty of aSession is equal to targetTty then",
+            "set transparency of aSession to 0",
+            'return "ok"',
+            "end if",
+            "end repeat",
+            "end repeat",
+            "end repeat",
+            'return ""',
+            "end tell",
+        ]
+
+    if title is None:
+        return [
+            'tell application "iTerm"',
+            'if (count of windows) = 0 then return ""',
+            "set transparency of current session of current window to 0",
+            'return "ok"',
+            "end tell",
+        ]
+
+    return [
+        f"set targetTitle to {_applescript_string(title)}",
+        'tell application "iTerm"',
+        'if (count of windows) = 0 then return ""',
+        "repeat with aWindow in windows",
+        "if name of aWindow is equal to targetTitle then",
+        "set transparency of current session of aWindow to 0",
+        'return "ok"',
+        "end if",
+        "end repeat",
+        'return ""',
+        "end tell",
+    ]
 
 
 def _macos_set_window_bounds_lines(

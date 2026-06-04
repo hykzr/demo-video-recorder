@@ -93,7 +93,7 @@ def test_open_terminal_new_window_launches_macos_terminal(
     launcher.unlink(missing_ok=True)
 
 
-def test_open_terminal_preclears_before_starting_capture_on_macos(
+def test_open_terminal_passes_clear_through_to_start_recording(
     tmp_path, monkeypatch
 ) -> None:
     recorder = CLIDemoRecorder(tmp_path / "demo.mp4", typed_character_delay=0)
@@ -111,12 +111,59 @@ def test_open_terminal_preclears_before_starting_capture_on_macos(
     monkeypatch.setattr(
         recorder,
         "start_recording",
-        lambda *, region=None: events.append("start") or recorder,
+        lambda *, region=None, clear=False: (
+            events.append(f"start:{clear}") or recorder
+        ),
     )
 
     recorder.open_terminal(start_recording=True, clear=True, check_access=False)
 
-    assert events == ["clear", "start"]
+    assert events == ["start:True"]
+
+
+def test_cli_start_recording_makes_macos_terminal_opaque_before_capture(
+    tmp_path, monkeypatch
+) -> None:
+    recorder = CLIDemoRecorder(tmp_path / "demo.mp4", typed_character_delay=0)
+    recorder.capture_window = WindowInfo(
+        0,
+        "Demo",
+        CaptureRegion(0, 0, 1280, 720),
+    )
+    recorder.capture_region = recorder.capture_window.region
+    events: list[str] = []
+
+    monkeypatch.setattr("demo_video_recorder.cli.platform.system", lambda: "Darwin")
+    monkeypatch.setattr(
+        "demo_video_recorder.cli.windowing.make_macos_console_background_opaque",
+        lambda *, title=None: events.append(f"opaque:{title}") or True,
+    )
+    monkeypatch.setattr(recorder, "clear", lambda: events.append("clear") or recorder)
+    monkeypatch.setattr(
+        recorder.subtitles, "reset_file", lambda: events.append("reset")
+    )
+    monkeypatch.setattr(
+        recorder.capture,
+        "start",
+        lambda *, region=None: events.append(f"capture:{region is not None}"),
+    )
+    monkeypatch.setattr(
+        recorder.capture, "wait_until_ready", lambda: events.append("ready")
+    )
+    monkeypatch.setattr(
+        recorder.subtitles, "start_clock", lambda: events.append("clock")
+    )
+
+    recorder.start_recording(clear=True)
+
+    assert events == [
+        "opaque:Demo",
+        "clear",
+        "reset",
+        "capture:True",
+        "ready",
+        "clock",
+    ]
 
 
 def test_cli_tts_flow_writes_final_subtitles_and_cleans_up(
@@ -330,7 +377,9 @@ def test_open_terminal_clears_after_setup_and_recording(tmp_path, monkeypatch) -
     monkeypatch.setattr(
         recorder,
         "start_recording",
-        lambda *, region=None: events.append("start_recording"),
+        lambda *, region=None, clear=False: (
+            events.append(f"start_recording:{clear}")
+        ),
     )
     monkeypatch.setattr(recorder, "clear", lambda: events.append("clear"))
 
@@ -339,8 +388,7 @@ def test_open_terminal_clears_after_setup_and_recording(tmp_path, monkeypatch) -
     assert events == [
         "configure",
         "check_access",
-        "clear",
-        "start_recording",
+        "start_recording:True",
     ]
 
 
