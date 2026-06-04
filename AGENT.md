@@ -16,7 +16,7 @@ Use `demo-video-recorder` when the user asks for an automated demo video of a pr
 10. Stop and tell the user when a global dependency is missing, especially `ffmpeg` or `ffprobe`. On macOS, burned subtitles also require an `ffmpeg` build with the `subtitles` filter (`libass`) (e.g. ffmpeg-full), not the default Homebrew core formula.
 11. Unless otherwise specified, you do not need to create a full cli entry point and all parameters in your recorder script, just hard code them in script is fine. You can still have optional args if you need to change it frequently during testing
 12. If you use TTS, pick the speaker before recording starts. Follow the user's instructions when they specify a voice; otherwise choose one that fits the project's theme and audience. Use `list_speakers()` on the backend when you need to inspect available voices.
-13. TTS generation may be slow enough to show up as dead air in the capture, for pre-determined and long text, pre-synthesize it first with `synthesize_explanation_audio()` or the backend's `synthesize()`, then pass that audio into `explain(..., audio=prepared_audio)`.
+13. TTS generation may be slow enough to show up as dead air in the capture, for pre-determined and long text, pre-synthesize it first with `synthesize_explanation_audio()`, then pass that prepared result into `explain(prepared_explanation)`.
 
 ## Defaults
 
@@ -41,8 +41,8 @@ Useful helpers when narration audio is enabled:
 
 - `EdgeTTSBackend(save_dir=..., speaker=..., speed=..., volume=...)`
 - `tts.list_speakers()` to inspect available voices
-- `recorder.synthesize_explanation_audio("...")` to prepare a clip ahead of time
-- `recorder.explain("...", audio=prepared_audio)` to reuse pre-generated narration without blocking capture
+- `recorder.synthesize_explanation_audio("...")` to prepare narration text plus audio ahead of time
+- `recorder.explain(prepared_explanation)` to reuse pre-generated narration without blocking capture
 
 ## Output-Aware CLI Demos
 

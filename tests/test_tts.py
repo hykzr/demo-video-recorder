@@ -6,7 +6,11 @@ import types
 
 from demo_video_recorder import DemoVideoRecorder, EdgeTTSBackend, TTSBackend
 from demo_video_recorder.subtitles import CueDisplay
-from demo_video_recorder.tts import NarrationClip, SynthesizedAudio
+from demo_video_recorder.tts import (
+    NarrationClip,
+    SynthesizedAudio,
+    SynthesizedExplanation,
+)
 
 
 def test_tts_backend_synthesize_uses_save_audio_and_probes_duration(
@@ -19,7 +23,9 @@ def test_tts_backend_synthesize_uses_save_audio_and_probes_duration(
             path.write_bytes(b"mp3")
             return path
 
-    monkeypatch.setattr("demo_video_recorder.tts.shutil.which", lambda _: "/usr/bin/ffprobe")
+    monkeypatch.setattr(
+        "demo_video_recorder.tts.shutil.which", lambda _: "/usr/bin/ffprobe"
+    )
     monkeypatch.setattr(
         "demo_video_recorder.tts.subprocess.run",
         lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "1.25\n", ""),
@@ -33,56 +39,9 @@ def test_tts_backend_synthesize_uses_save_audio_and_probes_duration(
     assert result.path.read_bytes() == b"mp3"
 
 
-def test_edge_tts_backend_save_audio_and_list_speakers(tmp_path, monkeypatch) -> None:
-    saved_audio: dict[str, Path] = {}
-
-    class FakeCommunicate:
-        def __init__(self, text: str, speaker: str, *, rate: str, volume: str) -> None:
-            assert text == "hello there"
-            assert speaker == "en-US-AvaNeural"
-            assert rate == "+12%"
-            assert volume == "-5%"
-
-        def save_sync(self, path: str) -> None:
-            saved_audio["path"] = Path(path)
-            Path(path).write_bytes(b"mp3")
-
-    async def fake_list_voices() -> list[dict[str, str]]:
-        return [
-            {"ShortName": "en-US-AvaNeural"},
-            {"ShortName": "en-US-JennyNeural"},
-        ]
-
-    monkeypatch.setattr("demo_video_recorder.tts.shutil.which", lambda _: "/usr/bin/ffprobe")
-
-    def fake_import_module(name: str):
-        assert name == "edge_tts"
-        return types.SimpleNamespace(
-            Communicate=FakeCommunicate,
-            list_voices=fake_list_voices,
-        )
-
-    monkeypatch.setattr("demo_video_recorder.tts.import_module", fake_import_module)
-    monkeypatch.setattr(
-        "demo_video_recorder.tts.subprocess.run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "1.25\n", ""),
-    )
-
-    backend = EdgeTTSBackend(
-        save_dir=tmp_path / "tts",
-        speaker="en-US-AvaNeural",
-        speed="+12%",
-        volume="-5%",
-    )
-
-    result = backend.synthesize("hello there")
-
-    assert result.duration_seconds == 1.25
-    assert result.path == saved_audio["path"]
-    assert backend.list_speaker() == ["en-US-AvaNeural", "en-US-JennyNeural"]
-
-
-def test_demo_recorder_explain_uses_tts_duration_for_wait(tmp_path, monkeypatch) -> None:
+def test_demo_recorder_explain_uses_tts_duration_for_wait(
+    tmp_path, monkeypatch
+) -> None:
     class FakeTTS(TTSBackend):
         def save_audio(self, text: str) -> Path:
             assert text == "Narrate this"
@@ -94,7 +53,9 @@ def test_demo_recorder_explain_uses_tts_duration_for_wait(tmp_path, monkeypatch)
         def synthesize(self, text: str) -> SynthesizedAudio:
             return SynthesizedAudio(self.save_audio(text), 3.5)
 
-    recorder = DemoVideoRecorder(tmp_path / "demo.mp4", tts=FakeTTS(save_dir=tmp_path / "tts"))
+    recorder = DemoVideoRecorder(
+        tmp_path / "demo.mp4", tts=FakeTTS(save_dir=tmp_path / "tts")
+    )
     waited: list[CueDisplay] = []
 
     monkeypatch.setattr(recorder.subtitles, "open_cue", lambda text: 1.25)
@@ -113,29 +74,58 @@ def test_demo_recorder_explain_uses_tts_duration_for_wait(tmp_path, monkeypatch)
     ]
 
 
+def test_synthesize_explanation_audio_returns_text_and_audio(tmp_path) -> None:
+    class FakeTTS(TTSBackend):
+        def save_audio(self, text: str) -> Path:
+            assert text == "Prepared line"
+            audio_path = self.save_dir / "clip-0001.mp3"
+            audio_path.parent.mkdir(parents=True, exist_ok=True)
+            audio_path.write_bytes(b"mp3")
+            return audio_path
+
+        def synthesize(self, text: str) -> SynthesizedAudio:
+            return SynthesizedAudio(self.save_audio(text), 1.75)
+
+    recorder = DemoVideoRecorder(
+        tmp_path / "demo.mp4", tts=FakeTTS(save_dir=tmp_path / "tts")
+    )
+
+    prepared = recorder.synthesize_explanation_audio("  Prepared line  ")
+
+    assert prepared == SynthesizedExplanation(
+        text="Prepared line",
+        audio=SynthesizedAudio(tmp_path / "tts" / "clip-0001.mp3", 1.75),
+    )
+
+
 def test_demo_recorder_explain_accepts_pre_synthesized_audio(
     tmp_path, monkeypatch
 ) -> None:
+    prepared = SynthesizedExplanation(
+        text="Prepared line",
+        audio=SynthesizedAudio(tmp_path / "prepared.mp3", 1.75),
+    )
+    prepared.audio.path.write_bytes(b"prepared")
     recorder = DemoVideoRecorder(tmp_path / "demo.mp4")
-    audio_path = tmp_path / "prepared.mp3"
-    audio_path.write_bytes(b"prepared")
     waited: list[CueDisplay] = []
 
-    monkeypatch.setattr(recorder.subtitles, "open_cue", lambda text: 2.0)
+    opened: list[str] = []
+
+    def fake_open_cue(text: str) -> float:
+        opened.append(text)
+        return 2.0
+
+    monkeypatch.setattr(recorder.subtitles, "open_cue", fake_open_cue)
     monkeypatch.setattr(recorder.subtitles, "wait_for_display", waited.append)
-    monkeypatch.setattr(
-        recorder.capture,
-        "probe_duration_seconds",
-        lambda media_path=None: 1.75,
-    )
 
-    recorder.explain("Prepared line", audio=audio_path)
+    recorder.explain(prepared)
 
+    assert opened == ["Prepared line"]
     assert waited == [CueDisplay(3.75)]
     assert recorder._narration_clips == [
         NarrationClip(
             text="Prepared line",
-            path=audio_path,
+            path=prepared.audio.path,
             start_seconds=2.0,
             duration_seconds=1.75,
         )

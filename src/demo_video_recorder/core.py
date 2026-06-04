@@ -14,7 +14,11 @@ from demo_video_recorder.defaults import DEFAULTS
 from demo_video_recorder.errors import RecordingError
 from demo_video_recorder.macos import check_screen_recording_access
 from demo_video_recorder.subtitles import CueDisplay, SubtitleWriter
-from demo_video_recorder.tts import NarrationClip, SynthesizedAudio, TTSBackend
+from demo_video_recorder.tts import (
+    NarrationClip,
+    SynthesizedExplanation,
+    TTSBackend,
+)
 from demo_video_recorder.types import CaptureRegion, WindowInfo
 from demo_video_recorder import windowing
 
@@ -185,25 +189,36 @@ class DemoVideoRecorder:
 
     def explain(
         self,
-        text: str,
+        text: str | SynthesizedExplanation,
         *,
         wait: bool = True,
-        audio: SynthesizedAudio | str | Path | None = None,
     ) -> "DemoVideoRecorder":
         """Add narration text that will be burned as subtitles."""
 
-        if self.tts is None and audio is None:
-            self.subtitles.add_cue(text, wait=wait)
+        if isinstance(text, SynthesizedExplanation):
+            resolved_text = text.text
+            clip = text.audio
+        else:
+            resolved_text = text
+            clip = None
+
+        if self.tts is None and clip is None:
+            self.subtitles.add_cue(resolved_text, wait=wait)
             return self
 
-        start_seconds = self.subtitles.open_cue(text)
+        start_seconds = self.subtitles.open_cue(resolved_text)
         if start_seconds is None:
             return self
 
-        clip = self._resolve_explanation_audio(text, audio)
+        if clip is None:
+            if self.tts is None:
+                raise RecordingError(
+                    "Narration audio was requested, but no TTS backend is configured."
+                )
+            clip = self.tts.synthesize(resolved_text)
         self._narration_clips.append(
             NarrationClip(
-                text=text.strip(),
+                text=resolved_text.strip(),
                 path=clip.path,
                 start_seconds=start_seconds,
                 duration_seconds=clip.duration_seconds,
@@ -215,12 +230,13 @@ class DemoVideoRecorder:
             )
         return self
 
-    def synthesize_explanation_audio(self, text: str) -> SynthesizedAudio:
-        """Generate narration audio ahead of time for a later ``explain()`` call."""
+    def synthesize_explanation_audio(self, text: str) -> SynthesizedExplanation:
+        """Prepare narration text and audio ahead of a later ``explain()`` call."""
 
         if self.tts is None:
             raise RecordingError("Narration audio was requested, but TTS is disabled.")
-        return self.tts.synthesize(text)
+        trimmed = text.strip()
+        return SynthesizedExplanation(text=trimmed, audio=self.tts.synthesize(trimmed))
 
     def wait(self, seconds: float) -> "DemoVideoRecorder":
         time.sleep(seconds)
@@ -276,9 +292,7 @@ class DemoVideoRecorder:
             audio_path=audio_path,
         )
 
-    def render_narration_audio(
-        self, output_path: str | Path | None = None
-    ) -> Path:
+    def render_narration_audio(self, output_path: str | Path | None = None) -> Path:
         """Render the synthesized narration timeline without screen capture."""
 
         if self.tts is None and not self._narration_clips:
@@ -364,22 +378,3 @@ class DemoVideoRecorder:
             return
         self.tts.cleanup()
         self.narration_audio_path.unlink(missing_ok=True)
-
-    def _resolve_explanation_audio(
-        self,
-        text: str,
-        audio: SynthesizedAudio | str | Path | None,
-    ) -> SynthesizedAudio:
-        if isinstance(audio, SynthesizedAudio):
-            return audio
-        if audio is not None:
-            audio_path = Path(audio)
-            return SynthesizedAudio(
-                path=audio_path,
-                duration_seconds=self.capture.probe_duration_seconds(audio_path),
-            )
-        if self.tts is None:
-            raise RecordingError(
-                "Narration audio was requested, but no TTS backend is configured."
-            )
-        return self.tts.synthesize(text)

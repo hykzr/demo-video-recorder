@@ -88,7 +88,9 @@ def test_open_terminal_new_window_launches_macos_terminal(
     launcher.unlink(missing_ok=True)
 
 
-def test_cli_tts_flow_writes_final_subtitles_and_cleans_up(tmp_path, monkeypatch) -> None:
+def test_cli_tts_flow_writes_final_subtitles_and_cleans_up(
+    tmp_path, monkeypatch
+) -> None:
     app = tmp_path / "timed_app.py"
     app.write_text(
         "\n".join(
@@ -160,7 +162,7 @@ def test_cli_tts_flow_writes_final_subtitles_and_cleans_up(tmp_path, monkeypatch
 
     def fake_start(*, region=None) -> None:
         del region
-        recorder.capture.process = FakeCaptureProcess()
+        recorder.capture.process = FakeCaptureProcess()  # type: ignore
         recorder.raw_video_path.write_bytes(b"raw-video")
 
     def fake_stop(*, timeout_seconds: float = 20.0) -> None:
@@ -195,7 +197,9 @@ def test_cli_tts_flow_writes_final_subtitles_and_cleans_up(tmp_path, monkeypatch
         fake_render_narration_audio,
     )
     monkeypatch.setattr(recorder.capture, "burn_subtitles", fake_burn_subtitles)
-    monkeypatch.setattr(recorder.subtitles, "start_clock", lambda: clock.start(recorder))
+    monkeypatch.setattr(
+        recorder.subtitles, "start_clock", lambda: clock.start(recorder)
+    )
     monkeypatch.setattr(recorder.subtitles, "elapsed_seconds", clock.elapsed)
     monkeypatch.setattr(
         recorder.subtitles,
@@ -205,7 +209,7 @@ def test_cli_tts_flow_writes_final_subtitles_and_cleans_up(tmp_path, monkeypatch
         ),
     )
 
-    prepared_audio = recorder.synthesize_explanation_audio("Second reaction")
+    prepared_explanation = recorder.synthesize_explanation_audio("Second reaction")
 
     recorder.start_recording()
     recorder.explain("Intro line")
@@ -216,7 +220,7 @@ def test_cli_tts_flow_writes_final_subtitles_and_cleans_up(tmp_path, monkeypatch
     recorder.input("hello", wait_after=0)
     recorder.expect_output("first: hello")
     recorder.expect_output("Input2>")
-    recorder.explain("Second reaction", audio=prepared_audio)
+    recorder.explain(prepared_explanation)
     recorder.input("bye", wait_after=0)
     recorder.expect_output("second: bye")
     recorder.expect_output("done")

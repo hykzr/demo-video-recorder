@@ -101,10 +101,7 @@ def main():
         marker = r.mark_output()
         r.input("help")
         r.expect_regex(r"Commands?:", since=marker)
-        r.explain(
-            "The app responds to typed input while subtitles explain the action.",
-            audio=prepared,
-        )
+        r.explain(prepared)
         r.input("quit")
         r.stop_app()
     finally:
@@ -123,14 +120,15 @@ Useful methods:
 - `mark_output()` / `output_since(marker)`: isolate output caused by one action.
 - `output_text("stdout")` and `output_text("stderr")`: inspect streams separately.
 - `explain("...")`: adds narration subtitles and, when TTS is configured, also generates a spoken narration clip.
-- `synthesize_explanation_audio("...")`: prepares a narration clip ahead of time so `explain()` does not need to wait on synthesis during capture.
+- `explain(prepared_explanation)`: reuses pre-generated narration text and audio without repeating the same string literal.
+- `synthesize_explanation_audio("...")`: prepares a `SynthesizedExplanation` ahead of time so `explain()` does not need to wait on synthesis during capture.
 - `EdgeTTSBackend.list_speakers()`: returns available Edge voices so you can choose one that fits the audience and tone.
 - `stop_recording()`: stops capture, trims subtitles to video duration, and writes the final MP4 with subtitles and narration audio.
 - `render_narration_audio()`: exports just the synthesized narration timeline, useful for `--audio-only` test runs.
 
 When `new_window=True` is used, the recorder re-runs the script in a dedicated terminal session. On Windows it opens a new console; on macOS it opens a new Terminal.app window and captures that window instead of the whole display when bounds are available. Worker stdout and stderr are also mirrored to `out/<name>.worker.log`. If the worker fails, the parent process prints the log tail so the recording script is easier to debug.
 
-When TTS is enabled, `explain()` uses the real generated audio length instead of the word-count estimate. If synthesis latency could show up in the capture, pre-generate the clip and pass it into `explain(..., audio=prepared_audio)`. Intermediate per-line clips are removed after the final output unless `keep_tts_audio=True`.
+When TTS is enabled, `explain()` uses the real generated audio length instead of the word-count estimate. If synthesis latency could show up in the capture, pre-generate the clip and pass it straight into `explain(prepared_explanation)`. Intermediate per-line clips are removed after the final output unless `keep_tts_audio=True`.
 
 ## GUI or App Window API
 

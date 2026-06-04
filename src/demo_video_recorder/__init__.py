@@ -18,6 +18,7 @@ from demo_video_recorder.tts import (
     EdgeTTSBackend,
     NarrationClip,
     SynthesizedAudio,
+    SynthesizedExplanation,
     TTSBackend,
 )
 from demo_video_recorder.types import CaptureRegion, WindowInfo
@@ -39,6 +40,7 @@ __all__ = [
     "RecordingError",
     "ScreenRecordingAccessResult",
     "SynthesizedAudio",
+    "SynthesizedExplanation",
     "TTSBackend",
     "WindowInfo",
     "WindowNotFoundError",

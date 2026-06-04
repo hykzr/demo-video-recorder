@@ -9,6 +9,7 @@ from pathlib import Path
 import asyncio
 import shutil
 import subprocess
+import edge_tts
 
 from demo_video_recorder.errors import DependencyMissingError, RecordingError
 
@@ -19,6 +20,14 @@ class SynthesizedAudio:
 
     path: Path
     duration_seconds: float
+
+
+@dataclass(frozen=True)
+class SynthesizedExplanation:
+    """Prepared narration text paired with synthesized audio."""
+
+    text: str
+    audio: SynthesizedAudio
 
 
 @dataclass(frozen=True)
@@ -46,9 +55,7 @@ class TTSBackend(ABC):
             raise RecordingError("Cannot synthesize empty narration text.")
 
         if shutil.which(self.ffprobe) is None:
-            raise DependencyMissingError(
-                f"Missing external dependency: {self.ffprobe}"
-            )
+            raise DependencyMissingError(f"Missing external dependency: {self.ffprobe}")
 
         self.save_dir.mkdir(parents=True, exist_ok=True)
         output_path = self.save_audio(trimmed)
@@ -135,7 +142,6 @@ class EdgeTTSBackend(TTSBackend):
     def save_audio(self, text: str) -> Path:
         """Render ``text`` to a new MP3 file and return its path."""
 
-        edge_tts = self._load_edge_tts()
         output_path = self.save_dir / f"clip-{self._index:04}.mp3"
         self._index += 1
 
@@ -155,23 +161,12 @@ class EdgeTTSBackend(TTSBackend):
     def list_speakers(self) -> list[str]:
         """Return all available Edge TTS voice names."""
 
-        edge_tts = self._load_edge_tts()
-        list_voices = getattr(edge_tts, "list_voices", None)
-        if callable(list_voices):
-            voices = list_voices()
-            if asyncio.iscoroutine(voices):
-                voices = asyncio.run(voices)
-            return sorted(
-                voice["ShortName"]
-                for voice in voices
-                if isinstance(voice, dict) and "ShortName" in voice
-            )
+        voices = edge_tts.list_voices()
+        if asyncio.iscoroutine(voices):
+            voices = asyncio.run(voices)
+        return sorted(
+            voice["ShortName"]
+            for voice in voices
+            if isinstance(voice, dict) and "ShortName" in voice
+        )
         return []
-
-    def _load_edge_tts(self):
-        try:
-            return import_module("edge_tts")
-        except ModuleNotFoundError as exc:
-            raise DependencyMissingError(
-                "Missing Python dependency: edge-tts. Install it with `uv add edge-tts`."
-            ) from exc

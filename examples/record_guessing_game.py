@@ -13,6 +13,7 @@ from demo_video_recorder import (
     FAST_SMOKE_TEST_DEFAULTS,
     ProcessError,
 )
+from demo_video_recorder.tts import SynthesizedExplanation
 
 ROOT = Path(__file__).resolve().parents[1]
 GAME = Path(__file__).with_name("guessing_game.py")
@@ -106,7 +107,9 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def open_game(recorder: CLIDemoRecorder, *, label: str) -> tuple[int, int]:
+def open_game(
+    recorder: CLIDemoRecorder, *, label: str | SynthesizedExplanation
+) -> tuple[int, int]:
     recorder.explain(label)
     recorder.run(
         [sys.executable, str(GAME)],
@@ -170,7 +173,9 @@ def play_by_feedback(recorder: CLIDemoRecorder, low: int, high: int) -> int:
     )
 
 
-def play_one_game(recorder: CLIDemoRecorder, *, launch_message: str) -> int:
+def play_one_game(
+    recorder: CLIDemoRecorder, *, launch_message: str | SynthesizedExplanation
+) -> int:
     low, high = open_game(recorder, label=launch_message)
     return play_by_feedback(recorder, low, high)
 
@@ -220,6 +225,25 @@ def main(argv: list[str] | None = None) -> int:
     )
     final_path: Path | None = None
 
+    intro_msg = recorder.synthesize_explanation_audio(
+        "I'm going to play a guessing game CLI app and record the session. Let's see how it goes!"
+    )
+    first_run_msg = recorder.synthesize_explanation_audio(
+        "First run. I'll open the game and start guessing."
+    )
+    new_run_msg = recorder.synthesize_explanation_audio(
+        "Now I'm going to reopen the game. The goal is to prove a new run really comes with a random number."
+    )
+    subsequent_run_msg = recorder.synthesize_explanation_audio(
+        "Let's try the game again."
+    )
+    same_number_msg = recorder.synthesize_explanation_audio(
+        "Hmm, it rolled the same number again. That's unlikely but not impossible"
+    )
+    conclusion_msg = recorder.synthesize_explanation_audio(
+        "Thanks for watching this demo of the guessing game. It shows how the recorder can react to app output and use TTS narration to explain what's happening on screen."
+    )
+
     try:
         if not audio_only:
             recorder.open_terminal(
@@ -230,39 +254,31 @@ def main(argv: list[str] | None = None) -> int:
                 check_access=args.check_access and not args.no_record,
             )
 
-        recorder.explain(
-            "Let's do this like a real little live demo: the game picks randomly, and I'll figure it out from the clues."
-        )
+        recorder.explain(intro_msg)
         first_answer = play_one_game(
             recorder,
-            launch_message="First run. I'll open the game and let it choose whatever number it wants.",
+            launch_message=first_run_msg,
         )
 
-        recorder.explain(
-            "Now I'm going to reopen the CLI app. The goal is to prove a new run starts fresh."
-        )
+        recorder.explain(new_run_msg)
         for attempt in range(1, args.max_reopen_attempts + 1):
             second_answer = play_one_game(
                 recorder,
-                launch_message=f"Reopen attempt {attempt}: fresh process, fresh random pick.",
+                launch_message=subsequent_run_msg,
             )
             if second_answer != first_answer:
                 recorder.explain(
-                    f"Nice, this time it picked {second_answer} instead of {first_answer}. Reopen behavior checked."
+                    f"Nice, this time it picked {second_answer} instead of {first_answer}. It works!"
                 )
                 break
 
-            recorder.explain(
-                f"Oops, it rolled {second_answer} again. Randomness is allowed to be boring; I'll reopen once more."
-            )
+            recorder.explain(same_number_msg)
         else:
             raise ProcessError(
                 f"The game repeated {first_answer} for {args.max_reopen_attempts} reopen attempts."
             )
+        recorder.explain(conclusion_msg)
 
-        recorder.explain(
-            "That's the demo: random app behavior, output-aware guesses, and a clean reopen check."
-        )
         if audio_only:
             final_path = recorder.render_narration_audio(output_path)
         elif args.no_record and tts_enabled:
