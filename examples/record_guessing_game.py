@@ -23,6 +23,7 @@ OUTCOME_PATTERN = (
     r"(?P<won>You got it in (?P<attempts>\d+) guesses\.)"
 )
 MAX_REOPEN_ATTEMPTS = 10
+DEFAULT_WINDOW_SIZE = (1200, 1200)
 
 
 def default_output_path(*, audio_only: bool) -> Path:
@@ -41,6 +42,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--new-window",
         action="store_true",
         help="Rerun this script in a dedicated terminal session before recording.",
+    )
+    parser.add_argument(
+        "--window-size",
+        type=parse_window_size,
+        default=DEFAULT_WINDOW_SIZE,
+        metavar="WIDTHxHEIGHT",
+        help="Terminal window size in pixels. Defaults to 1200x1200.",
     )
     parser.add_argument(
         "--no-record",
@@ -105,6 +113,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Safety cap while waiting for the random second answer to differ.",
     )
     return parser
+
+
+def parse_window_size(value: str) -> tuple[int, int]:
+    try:
+        width_text, height_text = value.lower().split("x", 1)
+        width = int(width_text)
+        height = int(height_text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "window size must look like WIDTHxHEIGHT, for example 1200x1200"
+        ) from exc
+
+    if width <= 0 or height <= 0:
+        raise argparse.ArgumentTypeError(
+            "window size values must be positive integers"
+        )
+    return (width, height)
 
 
 def open_game(
@@ -249,6 +274,7 @@ def main(argv: list[str] | None = None) -> int:
             recorder.open_terminal(
                 title="Guessing Game Demo",
                 top=True,
+                window_size=args.window_size,
                 start_recording=not args.no_record,
                 new_window=args.new_window,
                 check_access=args.check_access and not args.no_record,

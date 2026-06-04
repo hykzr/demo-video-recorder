@@ -91,7 +91,12 @@ def main():
     )
     r = CLIDemoRecorder("out/demo.mp4", words_per_minute=165, tts=tts)
     try:
-        r.open_terminal(title="Demo", top=True, start_recording=True)
+        r.open_terminal(
+            title="Demo",
+            top=True,
+            window_size=(1200, 1200),
+            start_recording=True,
+        )
         prepared = r.synthesize_explanation_audio(
             "The app responds to typed input while subtitles explain the action."
         )

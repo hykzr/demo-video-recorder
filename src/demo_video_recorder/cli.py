@@ -112,7 +112,8 @@ class CLIDemoRecorder(DemoVideoRecorder):
         *,
         title: str | None = None,
         top: bool = False,
-        maximize: bool = True,
+        maximize: bool = False,
+        window_size: tuple[int, int] | None = None,
         start_recording: bool = True,
         new_window: bool = False,
         script_path: str | Path | None = None,
@@ -131,19 +132,7 @@ class CLIDemoRecorder(DemoVideoRecorder):
 
         self._install_worker_log()
 
-        if new_window and os.name == "nt" and os.environ.get(_WORKER_ENV) != "1":
-            return_code = self._run_in_new_terminal_worker(
-                title=title,
-                script_path=script_path,
-                extra_args=extra_args,
-                wait=wait_for_worker,
-            )
-            raise SystemExit(return_code)
-        if (
-            new_window
-            and platform.system() == "Darwin"
-            and os.environ.get(_WORKER_ENV) != "1"
-        ):
+        if new_window and os.environ.get(_WORKER_ENV) != "1":
             return_code = self._run_in_new_terminal_worker(
                 title=title,
                 script_path=script_path,
@@ -152,12 +141,13 @@ class CLIDemoRecorder(DemoVideoRecorder):
             )
             raise SystemExit(return_code)
 
-        terminal_title = title or f"Demo Video Recorder {os.getpid()}"
+        terminal_title = title or f"Demo Video Recorder"
         self._configure_non_windows_terminal_title(terminal_title)
         window = windowing.configure_current_console(
             title=terminal_title,
             maximize=maximize,
             top=top,
+            window_size=window_size,
         )
         if window is not None:
             self.capture_window = window

@@ -69,11 +69,6 @@ class TTSBackend(ABC):
 
         shutil.rmtree(self.save_dir, ignore_errors=True)
 
-    def list_speaker(self) -> list[str]:
-        """Return available voice identifiers for this backend."""
-
-        return self.list_speakers()
-
     def list_speakers(self) -> list[str]:
         """Return available voice identifiers for this backend."""
 

@@ -65,7 +65,7 @@ class FfmpegCaptureBackend:
         system = platform.system()
         command = self._build_start_command(system=system, region=region)
 
-        print(f"Starting ffmpeg capture with command: {' '.join(command)}")
+        # print(f"Starting ffmpeg capture with command: {' '.join(command)}")
 
         self.process = subprocess.Popen(
             command,

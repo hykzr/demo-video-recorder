@@ -135,6 +135,29 @@ def clamp_region_to_virtual_screen(region: CaptureRegion) -> CaptureRegion:
     return CaptureRegion(left, top, width, height)
 
 
+def fit_region_in_screen(
+    region: CaptureRegion,
+    screen: CaptureRegion,
+    *,
+    preferred_size: tuple[int, int] | None = None,
+) -> CaptureRegion:
+    """Resize and reposition a region so it stays fully inside ``screen``."""
+
+    width = region.width
+    height = region.height
+    if preferred_size is not None:
+        width, height = preferred_size
+
+    width = max(1, min(width, screen.width))
+    height = max(1, min(height, screen.height))
+
+    max_left = screen.left + screen.width - width
+    max_top = screen.top + screen.height - height
+    left = min(max(region.left, screen.left), max_left)
+    top = min(max(region.top, screen.top), max_top)
+    return CaptureRegion(left, top, width, height)
+
+
 def get_window_title(hwnd: int) -> str:
     if not IS_WINDOWS or not hwnd:
         return ""
@@ -250,14 +273,51 @@ def activate_window(hwnd: int, *, maximize: bool = False, top: bool = False) -> 
         )
 
 
+def ensure_window_bounds(
+    hwnd: int,
+    *,
+    window_size: tuple[int, int] | None = None,
+) -> None:
+    if not IS_WINDOWS or not hwnd:
+        return
+
+    screen = get_virtual_screen_region()
+    region = get_window_region(hwnd)
+    if screen is None or region is None:
+        return
+
+    fitted = fit_region_in_screen(region, screen, preferred_size=window_size)
+    should_resize = (
+        fitted.left != region.left
+        or fitted.top != region.top
+        or fitted.width != region.width
+        or fitted.height != region.height
+    )
+    if not should_resize:
+        return
+
+    no_zorder = 0x0004
+    show_window = 0x0040
+    user32.SetWindowPos(
+        wintypes.HWND(hwnd),
+        wintypes.HWND(0),
+        fitted.left,
+        fitted.top,
+        fitted.width,
+        fitted.height,
+        no_zorder | show_window,
+    )
+
+
 def configure_current_console(
     *,
     title: str | None = None,
     maximize: bool = True,
     top: bool = False,
+    window_size: tuple[int, int] | None = None,
 ) -> WindowInfo | None:
     if IS_MACOS:
-        del maximize, top
+        del maximize, top, window_size
         if title:
             time.sleep(0.15)
         _activate_macos_console()
@@ -277,6 +337,7 @@ def configure_current_console(
             titled_window = None
         if titled_window is not None:
             activate_window(titled_window.hwnd, maximize=maximize, top=top)
+            ensure_window_bounds(titled_window.hwnd, window_size=window_size)
             time.sleep(0.25)
             refreshed_region = get_window_region(titled_window.hwnd)
             if refreshed_region is not None:
@@ -290,6 +351,7 @@ def configure_current_console(
         return None
 
     activate_window(window.hwnd, maximize=maximize, top=top)
+    ensure_window_bounds(window.hwnd, window_size=window_size)
     time.sleep(0.25)
     return get_current_console_window() or window
 
@@ -387,7 +449,7 @@ def _current_tty_path() -> str | None:
         if not os.isatty(fd):
             continue
         try:
-            return os.ttyname(fd)
+            return os.ttyname(fd) # type: ignore
         except OSError:
             continue
     return None
