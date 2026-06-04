@@ -96,6 +96,7 @@ def main():
             top=True,
             window_size=(1200, 1200),
             start_recording=True,
+            clear=True,
         )
         prepared = r.synthesize_explanation_audio(
             "The app responds to typed input while subtitles explain the action."
@@ -118,6 +119,7 @@ def main():
 Useful methods:
 
 - `open_terminal(...)`: configures the terminal and can start recording immediately.
+- `clear()`: clears the current terminal with `clear` or `cls`.
 - `run(..., interactive=True)`: starts a CLI app and streams stdout/stderr to the recorded terminal.
 - `input("text")`: types into the active CLI app with a configurable typing delay.
 - `expect_output("text")`: waits until expected app output appears.

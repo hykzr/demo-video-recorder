@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -282,3 +283,52 @@ def test_open_terminal_passes_custom_window_size_to_windowing(
 
     assert captured["window_size"] == (800, 600)
     assert recorder.capture_region == CaptureRegion(10, 20, 800, 600)
+
+
+def test_open_terminal_clears_after_setup_and_recording(
+    tmp_path, monkeypatch
+) -> None:
+    recorder = CLIDemoRecorder(tmp_path / "demo.mp4", typed_character_delay=0)
+    events: list[str] = []
+
+    monkeypatch.setattr(
+        "demo_video_recorder.cli.windowing.configure_current_console",
+        lambda **kwargs: (
+            events.append("configure"),
+            WindowInfo(1, "Demo Video Recorder", CaptureRegion(0, 0, 800, 600)),
+        )[1],
+    )
+    monkeypatch.setattr(
+        recorder,
+        "ensure_screen_recording_access",
+        lambda **kwargs: events.append("check_access"),
+    )
+    monkeypatch.setattr(
+        recorder,
+        "start_recording",
+        lambda *, region=None: events.append("start_recording"),
+    )
+    monkeypatch.setattr(recorder, "clear", lambda: events.append("clear"))
+
+    recorder.open_terminal(check_access=True)
+
+    assert events == [
+        "configure",
+        "check_access",
+        "start_recording",
+        "clear",
+    ]
+
+
+def test_cli_clear_uses_platform_command(tmp_path, monkeypatch) -> None:
+    recorder = CLIDemoRecorder(tmp_path / "demo.mp4", typed_character_delay=0)
+    seen: list[str] = []
+
+    def fake_system(command: str) -> int:
+        seen.append(command)
+        return 0
+
+    monkeypatch.setattr("demo_video_recorder.cli.os.system", fake_system)
+
+    assert recorder.clear() is recorder
+    assert seen == ["cls" if os.name == "nt" else "clear"]

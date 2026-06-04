@@ -27,7 +27,11 @@ Do this before writing or running a recording script:
 5. On macOS, verify Screen Recording permission before capture.
    - Prefer the library helpers: `check_screen_recording_access(prompt=True)` or `open_terminal(check_access=True)`.
    - Stop and tell the user if access is still rejected after the prompt.
-6. If the demo needs narration audio, verify the TTS path too.
+6. Unless the user says otherwise, clear the terminal before the first recorded command after setup.
+   - `open_terminal(clear=True)` now does this by default after title changes, window sizing, permission checks, and `start_recording`.
+   - Use that first clear to wipe permission-check output or other setup noise that may still be visible when recording begins.
+   - You usually do not need additional clears for later commands unless the user asked for them or the previous command spammed a lot of low-value output.
+7. If the demo needs narration audio, verify the TTS path too.
    - Confirm the chosen backend is importable and usable in the active environment.
    - For `EdgeTTSBackend`, a simple preflight is `python -c "import edge_tts"`.
    - Use `list_speakers()` before recording when you need to inspect available voices.
@@ -117,6 +121,7 @@ def main():
             top=True,
             window_size=(1400, 1000),
             start_recording=True,
+            clear=True,
         )
         intro = r.synthesize_explanation_audio(
             "Today we'll demonstrate our new app"
@@ -218,7 +223,8 @@ class CLIDemoRecorder(
 ```
 
 - Inherits all `DemoVideoRecorder` methods.
-- `open_terminal(*, title=None, top=False, maximize=False, window_size=None, start_recording=True, new_window=False, script_path=None, extra_args=None, wait_for_worker=True, check_access=None, access_timeout_seconds=30.0) -> CLIDemoRecorder`
+- `open_terminal(*, title=None, top=False, maximize=False, window_size=None, start_recording=True, new_window=False, script_path=None, extra_args=None, wait_for_worker=True, check_access=None, access_timeout_seconds=30.0, clear=True) -> CLIDemoRecorder`
+- `clear() -> CLIDemoRecorder`
 - `run(command, *, cwd=None, env=None, interactive=False, command_label=None, shell=None, check=True, timeout=None, reveal_command=True) -> int | subprocess.Popen[str]`
 - `input(text: str, *, enter=True, delay=None, wait_after=0.25) -> CLIDemoRecorder`
 - `output_text(stream="combined") -> str`

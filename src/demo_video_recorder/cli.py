@@ -121,13 +121,15 @@ class CLIDemoRecorder(DemoVideoRecorder):
         wait_for_worker: bool = True,
         check_access: bool | None = None,
         access_timeout_seconds: float = 30.0,
+        clear: bool = True,
     ) -> "CLIDemoRecorder":
         """Prepare the terminal window and optionally start capture.
 
         On Windows and macOS, ``new_window=True`` re-runs the current script in a
         dedicated terminal session. The parent process waits for that worker and
         exits with the same code; the worker continues through the rest of the
-        user's script.
+        user's script. When ``clear=True``, the terminal is cleared after setup
+        and any recording start has completed.
         """
 
         self._install_worker_log()
@@ -164,6 +166,17 @@ class CLIDemoRecorder(DemoVideoRecorder):
 
         if start_recording:
             self.start_recording(region=self.capture_region)
+        if clear:
+            self.clear()
+        return self
+
+    def clear(self) -> "CLIDemoRecorder":
+        """Clear the visible terminal using the platform-native command."""
+
+        command = "cls" if os.name == "nt" else "clear"
+        if os.system(command) != 0 and os.name != "nt":
+            sys.stdout.write("\033[2J\033[H")
+            sys.stdout.flush()
         return self
 
     def run(

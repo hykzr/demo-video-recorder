@@ -156,9 +156,7 @@ def play_by_feedback(recorder: CLIDemoRecorder, low: int, high: int) -> int:
         guess = (low + high) // 2
         attempts += 1
         if attempts == 1:
-            recorder.explain(
-                f"I'm starting in the middle with {guess}. No peeking at the answer, just reading the hints."
-            )
+            recorder.explain(f"I'm starting in the middle with {guess}. ")
         elif low == high:
             recorder.explain(
                 f"The hints have narrowed it down to {guess}, so this should be the one."
@@ -185,9 +183,7 @@ def play_by_feedback(recorder: CLIDemoRecorder, low: int, high: int) -> int:
             continue
 
         recorder.expect_output("Thanks for playing.", since=marker, timeout_seconds=5)
-        recorder.explain(
-            f"And there we go: it was {guess}. We got there by reacting to the app output."
-        )
+        recorder.explain(f"And there we go: it was {guess}.")
         recorder.stop_app()
         return guess
 
@@ -249,7 +245,7 @@ def main(argv: list[str] | None = None) -> int:
     final_path: Path | None = None
 
     intro_msg = recorder.synthesize_explanation_audio(
-        "I'm going to play a guessing game CLI app and record the session. Let's see how it goes!"
+        "I'm going to demonstrate playing the CLI guessing game. Let's see how it goes!"
     )
     first_run_msg = recorder.synthesize_explanation_audio(
         "First run. I'll open the game and start guessing."
@@ -274,6 +270,7 @@ def main(argv: list[str] | None = None) -> int:
                 top=True,
                 window_size=args.window_size,
                 start_recording=not args.no_record,
+                clear=True,
                 new_window=args.new_window,
                 check_access=args.check_access and not args.no_record,
             )
