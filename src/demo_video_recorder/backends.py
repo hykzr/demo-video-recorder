@@ -18,6 +18,8 @@ from demo_video_recorder.subtitles import parse_srt_time
 from demo_video_recorder.tts import NarrationClip
 from demo_video_recorder.types import CaptureRegion
 
+from playwright.sync_api import Page
+
 
 class FfmpegCaptureBackend:
     """Record a screen region and burn subtitles using ffmpeg."""
@@ -912,3 +914,100 @@ class FfmpegCaptureBackend:
 
     def _between_expression(self, start_seconds: float, end_seconds: float) -> str:
         return f"between(t,{start_seconds:.3f},{end_seconds:.3f})"
+
+
+class PlaywrightVideoCaptureBackend(FfmpegCaptureBackend):
+    """Use Playwright's browser-context video recorder for raw capture.
+
+    Playwright records a video for each page when the browser context is created
+    with ``record_video_dir``. This backend saves the page video to
+    ``raw_video_path`` when capture stops, then reuses the ffmpeg helpers from
+    ``FfmpegCaptureBackend`` for probing, subtitle burn-in, and narration muxing.
+    """
+
+    def __init__(
+        self,
+        raw_video_path: str | Path,
+        *,
+        video_dir: str | Path | None = None,
+        framerate: int = DEFAULTS.capture_framerate,
+        scale_width: int | None = DEFAULTS.video_scale_width,
+        ffmpeg: str = "ffmpeg",
+        ffprobe: str = "ffprobe",
+        crf: int = 24,
+        preset: str = "veryfast",
+    ) -> None:
+        super().__init__(
+            raw_video_path,
+            framerate=framerate,
+            scale_width=scale_width,
+            ffmpeg=ffmpeg,
+            ffprobe=ffprobe,
+            crf=crf,
+            preset=preset,
+        )
+        self.video_dir = (
+            Path(video_dir)
+            if video_dir is not None
+            else self.raw_video_path.with_name(
+                f"{self.raw_video_path.stem}.playwright-videos"
+            )
+        )
+        self.page: Page | None = None
+        self._recording = False
+
+    @property
+    def is_recording(self) -> bool:
+        return self._recording
+
+    def attach_page(self, page: Page) -> None:
+        self.page = page
+
+    def context_video_options(
+        self,
+        *,
+        width: int,
+        height: int,
+    ) -> dict[str, object]:
+        self.video_dir.mkdir(parents=True, exist_ok=True)
+        return {
+            "record_video_dir": self.video_dir,
+            "record_video_size": {"width": width, "height": height},
+        }
+
+    def start(self, *, region: CaptureRegion | None = None) -> None:
+        del region
+        if self.is_recording:
+            raise RecordingError("Capture is already running.")
+        if self.page is None:
+            raise RecordingError("Playwright page is not attached for video capture.")
+        if self.page.video is None:
+            raise RecordingError(
+                "Playwright video capture is not enabled for this browser context."
+            )
+        self.raw_video_path.parent.mkdir(parents=True, exist_ok=True)
+        self._recording = True
+
+    def wait_until_ready(self, *, timeout_seconds: float = 15.0) -> None:
+        del timeout_seconds
+        if self.page is None or self.page.video is None:
+            raise RecordingError("Playwright video capture is not ready.")
+
+    def stop(self, *, timeout_seconds: float = 20.0) -> None:
+        del timeout_seconds
+        if not self._recording:
+            return
+        if self.page is None or self.page.video is None:
+            self._recording = False
+            raise RecordingError("Playwright page video was not available.")
+
+        video = self.page.video
+        context = self.page.context
+        try:
+            context.close()
+            video.save_as(self.raw_video_path)
+            video.delete()
+        except Exception as exc:  # pragma: no cover - Playwright raises rich errors.
+            raise RecordingError("Playwright video capture failed to save.") from exc
+        finally:
+            self._recording = False

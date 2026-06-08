@@ -5,6 +5,9 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import sys
+import pyrootutils
+
+root = pyrootutils.setup_root(__file__, dotenv=True, pythonpath=True, cwd=False)
 
 from demo_video_recorder import (
     CLIDemoRecorder,

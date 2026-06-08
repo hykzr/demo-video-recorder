@@ -20,6 +20,7 @@ Do this before writing or running a recording script:
 3. Verify global recording dependencies.
    - `ffmpeg -version`
    - `ffprobe -version`
+   - For Web UI demos, also verify the Playwright browser binary you plan to use, usually with `python -m playwright install chromium` if Chromium has not been installed yet.
 4. On macOS, also verify subtitle burn-in support.
    - Run `ffmpeg -hide_banner -filters | rg subtitles`
    - Stop and tell the user if the active `ffmpeg` build does not expose the `subtitles` filter (`libass`).
@@ -40,7 +41,7 @@ Do this before writing or running a recording script:
 
 1. Inspect the target project first. Identify the workflow that demonstrate the main features and anything else required from the user.
 2. Create a recording script, usually `record_demo.py`, that imports the recorder.
-3. Prefer `CLIDemoRecorder` for terminal apps and `DemoVideoRecorder` for GUI or browser windows.
+3. Prefer `CLIDemoRecorder` for terminal apps, `WebUIRecorder` for browser apps, and `DemoVideoRecorder` for native GUI windows.
 4. Record to `out/<project>-demo.mp4`, or the required location by user; if unspecified, keep generated output out of source control.
 5. Follow the user's prompt first for speed, pauses, tone, and coverage. If they do not specify speed, use `DEFAULTS` from the library.
 6. Follow the user's requested tone when given. Otherwise use a human live-demo style: natural, somewhat casual or lightly humorous, but still accurate and comprehensive. Unless otherwise specified, the subject should be `I` or `we`, not "the recorder", "the tool", or similar detached phrasing.
@@ -166,6 +167,43 @@ def main():
             r.stop_recording()
 ```
 
+## Web UI Pattern
+
+Use `WebUIRecorder` for browser demos. It defaults to Playwright's built-in page video recorder, so it works well in headless mode and does not need macOS Screen Recording permission unless you explicitly choose `video_backend="ffmpeg"`.
+
+```python
+from demo_video_recorder import WebUIRecorder
+
+
+def main():
+    r = WebUIRecorder("out/web-demo.mp4", headless=True, viewport=(1280, 720))
+    try:
+        r.serve("dist", 8000)
+        r.open_web("/")
+        r.explain("The app is open in a browser.")
+        r.find("input", placeholder="Email").fill("ada@example.com")
+        r.find(role="button", name="Continue").click()
+        r.find("main", text="Welcome")
+        r.explain("The page confirms that the workflow completed.")
+    finally:
+        r.close()
+        if r.is_recording:
+            r.stop_recording()
+```
+
+Useful helpers:
+
+- `serve(path, port=8000)` starts a static localhost server for a folder.
+- `open_web("example.com")` opens a URL; bare domains become `https://...`; relative URLs use the served folder.
+- `find(...)` is bs4-like and raises `WebElementNotFoundError` if no visible element is found.
+- `find_optional(...)` returns `None` instead of raising.
+- `find_all(...)` returns all matched elements.
+- Element actions include `highlight()`, `click()`, `double_click()`, `hover()`, `wait()`, `text()`, and `attribute()`.
+- Input/control actions include `fill()`, `type()`, `clear()`, `press()`, `check()`, `uncheck()`, and `select_option()`.
+- Form actions include `submit()`.
+
+Prefer robust selectors in this order: role and accessible name, label/placeholder/test id, then CSS selector. Use `find_optional()` when a conditional banner, modal, or toast may or may not appear.
+
 ## Public API
 
 This is the package-level public surface exported from `demo_video_recorder.__init__`.
@@ -238,6 +276,60 @@ class CLIDemoRecorder(
 - `stop_app(*, timeout_seconds=5.0) -> int | None`
 - `close() -> None`
 
+```python
+class WebUIRecorder(
+    output_path,
+    *,
+    browser="chromium",
+    headless=True,
+    viewport=(1280, 720),
+    video_backend="playwright",
+    slow_mo_ms=None,
+    **kwargs,
+)
+```
+
+- Inherits all `DemoVideoRecorder` methods.
+- `serve(path, port=8000, *, host="127.0.0.1") -> str`
+- `open_web(url=None, *, start_recording=True, wait_until="load", timeout_seconds=30.0, headless=None, viewport=None) -> WebUIRecorder`
+- `find(name=None, attrs=None, *, text=None, string=None, selector=None, role=None, timeout_seconds=10.0, **kwargs) -> WebElement`
+- `find_optional(name=None, attrs=None, *, text=None, string=None, selector=None, role=None, timeout_seconds=2.0, **kwargs) -> WebElement | None`
+- `find_all(name=None, attrs=None, *, text=None, string=None, selector=None, role=None, **kwargs) -> list[WebElement]`
+- `wait_for_url(url, *, timeout_seconds=10.0) -> WebUIRecorder`
+- `stop_recording(*, burn=None) -> Path`
+- `close() -> None`
+
+```python
+class WebElement
+```
+
+- `highlight(*, duration_ms=700) -> WebElement`
+- `wait(*, state="visible", timeout_seconds=10.0) -> WebElement`
+- `click(*, button="left", click_count=1, timeout_seconds=10.0, highlight=True) -> WebElement`
+- `double_click(*, timeout_seconds=10.0, highlight=True) -> WebElement`
+- `hover(*, timeout_seconds=10.0) -> WebElement`
+- `text(*, timeout_seconds=10.0) -> str`
+- `attribute(name, *, timeout_seconds=10.0) -> str | None`
+- `find(...)`, `find_optional(...)`, and `find_all(...)` scoped to that element.
+
+```python
+class WebInputElement(WebElement)
+```
+
+- `fill(value, *, timeout_seconds=10.0, highlight=True) -> WebInputElement`
+- `type(text, *, delay_ms=None, timeout_seconds=10.0, highlight=True) -> WebInputElement`
+- `clear(*, timeout_seconds=10.0, highlight=True) -> WebInputElement`
+- `press(key, *, timeout_seconds=10.0) -> WebInputElement`
+- `check(*, timeout_seconds=10.0, highlight=True) -> WebInputElement`
+- `uncheck(*, timeout_seconds=10.0, highlight=True) -> WebInputElement`
+- `select_option(value=None, *, label=None, index=None, timeout_seconds=10.0, highlight=True) -> WebInputElement`
+
+```python
+class WebFormElement(WebElement)
+```
+
+- `submit(*, highlight=True) -> WebFormElement`
+
 ### TTS
 
 ```python
@@ -302,6 +394,9 @@ class CaptureRegion(left: int, top: int, width: int, height: int)
 ```python
 class WindowInfo(hwnd: int, title: str, region: CaptureRegion)
 class OutputMarker(combined: int, stdout: int, stderr: int)
+class WebElement
+class WebInputElement(WebElement)
+class WebFormElement(WebElement)
 class ScreenRecordingAccessResult(granted: bool, prompted: bool, status: str)
 class SynthesizedAudio(path: Path, duration_seconds: float)
 class SynthesizedExplanation(text: str, audio: SynthesizedAudio)
@@ -318,6 +413,7 @@ class DependencyMissingError(DemoVideoRecorderError)
 class RecordingError(DemoVideoRecorderError)
 class WindowNotFoundError(DemoVideoRecorderError)
 class ProcessError(DemoVideoRecorderError)
+class WebElementNotFoundError(DemoVideoRecorderError)
 ```
 
 Keep demos short and clean. Seed test data when determinism matters; when the user wants randomness or live behavior, react to the app output instead of pretending the result is fixed.

@@ -19,3 +19,7 @@ class WindowNotFoundError(DemoVideoRecorderError):
 
 class ProcessError(DemoVideoRecorderError):
     """Raised when a managed demo process fails."""
+
+
+class WebElementNotFoundError(DemoVideoRecorderError):
+    """Raised when a requested web UI element cannot be located."""

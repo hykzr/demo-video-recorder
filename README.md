@@ -17,6 +17,12 @@ ffmpeg -version
 ffprobe -version
 ```
 
+For Web UI demos, install the Playwright browser binaries once:
+
+```bash
+uv run playwright install chromium
+```
+
 On macOS, high-quality burned subtitles require an `ffmpeg` build with the `subtitles` filter, which depends on `libass`. The default Homebrew `ffmpeg` formula does not include it. Install a libass-enabled build such as `ffmpeg-full`, then put it on `PATH`:
 
 ```bash
@@ -57,6 +63,14 @@ On macOS, `record.py` defaults to `--check-access`, which requests Screen Record
 
 The example app lives in `examples/guessing_game.py`; the recording script is `examples/record_guessing_game.py`.
 The example intentionally uses a random secret number, so the recorder reads the app output and chooses guesses from the hints instead of replaying fixed inputs.
+
+Record the bundled Web UI example:
+
+```bash
+uv run python examples/record_webui_app.py
+```
+
+That script serves `examples/webui_app/` on localhost, opens it with Playwright, fills an input, clicks a button, waits for the output, and writes `out/webui-demo.mp4`.
 
 ## Defaults
 
@@ -162,6 +176,52 @@ def main():
         if r.is_recording:
             r.stop_recording()
 ```
+
+## Web UI Demo API
+
+`WebUIRecorder` is built for browser demos. It defaults to Playwright's own video recorder, which works for headless browser contexts and produces the raw MP4 that the existing subtitle and narration pipeline finalizes with ffmpeg.
+
+```python
+from demo_video_recorder import WebUIRecorder
+
+
+def main():
+    r = WebUIRecorder("out/web-demo.mp4", headless=True, viewport=(1280, 720))
+    try:
+        r.serve("dist", 8000)
+        r.open_web("/")
+        r.explain("The local web app is open.")
+        r.find("input", placeholder="Ada Lovelace").fill("Grace Hopper")
+        r.find("button", text="Greet").click()
+        r.find("output", id="result", text="Grace Hopper").highlight()
+    finally:
+        r.close()
+        if r.is_recording:
+            r.stop_recording()
+```
+
+Useful methods:
+
+- `serve(path, port=8000)`: serves a static folder over `http://127.0.0.1:<port>`.
+- `open_web(url=None, ...)`: opens a URL. Bare domains such as `example.com` become `https://example.com`; relative paths such as `/demo` use the served folder.
+- `find(...)`: bs4-style element lookup that raises `WebElementNotFoundError` when nothing visible is found.
+- `find_optional(...)`: same lookup, returning `None` when nothing is found.
+- `find_all(...)`: returns all matched elements.
+- Element methods: `highlight()`, `click()`, `double_click()`, `hover()`, `wait()`, `text()`, and `attribute()`.
+- Input/control methods: `fill()`, `type()`, `clear()`, `press()`, `check()`, `uncheck()`, and `select_option()`.
+- Form methods: `submit()`.
+
+`find()` accepts `name` and attrs like Beautiful Soup, plus Playwright-friendly selectors:
+
+```python
+r.find("button", text="Save")
+r.find("input", {"name": "email"})
+r.find(selector="[data-testid='submit']")
+r.find(role="button", name="Continue")
+r.find(label="Email address").fill("ada@example.com")
+```
+
+If you need to record an actual visible browser window instead of Playwright's page video, pass `video_backend="ffmpeg"` and run headed with `headless=False`.
 
 ## Agent Usage
 

@@ -8,6 +8,7 @@ from demo_video_recorder.errors import (
     DependencyMissingError,
     ProcessError,
     RecordingError,
+    WebElementNotFoundError,
     WindowNotFoundError,
 )
 from demo_video_recorder.macos import (
@@ -22,6 +23,7 @@ from demo_video_recorder.tts import (
     TTSBackend,
 )
 from demo_video_recorder.types import CaptureRegion, WindowInfo
+from demo_video_recorder.web import WebElement, WebFormElement, WebInputElement, WebUIRecorder
 
 __all__ = [
     "CLIDemoRecorder",
@@ -42,6 +44,11 @@ __all__ = [
     "SynthesizedAudio",
     "SynthesizedExplanation",
     "TTSBackend",
+    "WebElement",
+    "WebElementNotFoundError",
+    "WebFormElement",
+    "WebInputElement",
+    "WebUIRecorder",
     "WindowInfo",
     "WindowNotFoundError",
 ]

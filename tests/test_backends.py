@@ -6,6 +6,7 @@ import subprocess
 import pytest
 
 from demo_video_recorder.backends import FfmpegCaptureBackend
+from demo_video_recorder.backends import PlaywrightVideoCaptureBackend
 from demo_video_recorder.errors import DependencyMissingError
 from demo_video_recorder.tts import NarrationClip
 from demo_video_recorder.types import CaptureRegion
@@ -259,3 +260,42 @@ def test_subtitles_filter_value_quotes_filename(tmp_path) -> None:
     assert value.startswith("subtitles=filename='")
     assert "\\:" in value
     assert "\\'" in value
+
+
+def test_playwright_video_backend_saves_page_video(tmp_path) -> None:
+    backend = PlaywrightVideoCaptureBackend(tmp_path / "demo.raw.mp4")
+    events: list[str] = []
+
+    class FakeContext:
+        def close(self) -> None:
+            events.append("context.close")
+
+    class FakeVideo:
+        def save_as(self, path: Path) -> None:
+            events.append(f"save_as:{path.name}")
+            path.write_bytes(b"video")
+
+        def delete(self) -> None:
+            events.append("video.delete")
+
+    class FakePage:
+        video = FakeVideo()
+        context = FakeContext()
+
+    backend.attach_page(FakePage())  # type: ignore[arg-type]
+    backend.start()
+    backend.stop()
+
+    assert events == ["context.close", "save_as:demo.raw.mp4", "video.delete"]
+    assert backend.raw_video_path.read_bytes() == b"video"
+    assert backend.is_recording is False
+
+
+def test_playwright_video_backend_builds_context_video_options(tmp_path) -> None:
+    backend = PlaywrightVideoCaptureBackend(tmp_path / "demo.raw.mp4")
+
+    options = backend.context_video_options(width=1024, height=768)
+
+    assert options["record_video_dir"] == backend.video_dir
+    assert options["record_video_size"] == {"width": 1024, "height": 768}
+    assert backend.video_dir.exists()

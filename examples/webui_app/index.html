@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Web UI Demo App</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #f6f8fb;
+        color: #15202b;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+      }
+
+      main {
+        width: min(720px, calc(100vw - 48px));
+        background: white;
+        border: 1px solid #d8e0ea;
+        border-radius: 8px;
+        box-shadow: 0 18px 48px rgba(36, 52, 78, 0.14);
+        padding: 32px;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 32px;
+      }
+
+      p {
+        margin: 0 0 24px;
+        color: #536170;
+      }
+
+      form {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 12px;
+      }
+
+      label {
+        grid-column: 1 / -1;
+        font-weight: 650;
+      }
+
+      input {
+        min-height: 44px;
+        border: 1px solid #aab7c7;
+        border-radius: 6px;
+        font-size: 18px;
+        padding: 0 12px;
+      }
+
+      button {
+        min-height: 44px;
+        border: 0;
+        border-radius: 6px;
+        background: #2364aa;
+        color: white;
+        font-size: 16px;
+        font-weight: 700;
+        padding: 0 18px;
+      }
+
+      output {
+        display: block;
+        margin-top: 24px;
+        min-height: 28px;
+        font-size: 22px;
+        font-weight: 700;
+        color: #156064;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Greeting Builder</h1>
+      <p>Enter a name and the page will produce a friendly greeting.</p>
+      <form id="greeting-form">
+        <label for="name">Name</label>
+        <input id="name" name="name" placeholder="Ada Lovelace" autocomplete="off" />
+        <button type="submit">Greet</button>
+      </form>
+      <output id="result" aria-live="polite"></output>
+    </main>
+    <script>
+      const form = document.querySelector("#greeting-form");
+      const input = document.querySelector("#name");
+      const result = document.querySelector("#result");
+
+      form.addEventListener("submit", event => {
+        event.preventDefault();
+        const name = input.value.trim() || "friend";
+        result.textContent = `Hello, ${name}. Your web UI demo is working.`;
+      });
+    </script>
+  </body>
+</html>
