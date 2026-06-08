@@ -29,6 +29,8 @@ from demo_video_recorder.errors import RecordingError, WebElementNotFoundError
 
 BrowserName = Literal["chromium", "firefox", "webkit"]
 WebVideoBackend = Literal["playwright", "ffmpeg"]
+INPUT_SELECTOR = "input, textarea"
+SELECT_SELECTOR = "select"
 
 
 class WebElement:
@@ -176,6 +178,98 @@ class WebElement:
             **kwargs,
         )
 
+    def find_input(
+        self,
+        name: str | None = None,
+        attrs: Mapping[str, object] | None = None,
+        *,
+        text: str | re.Pattern[str] | None = None,
+        string: str | re.Pattern[str] | None = None,
+        selector: str | None = None,
+        role: str | None = None,
+        timeout_seconds: float = 10.0,
+        **kwargs: object,
+    ) -> "WebInputElement":
+        return self.recorder._find_input_in_scope(
+            self.locator,
+            name,
+            attrs,
+            text=text,
+            string=string,
+            selector=selector,
+            role=role,
+            timeout_seconds=timeout_seconds,
+            **kwargs,
+        )
+
+    def find_all_input(
+        self,
+        name: str | None = None,
+        attrs: Mapping[str, object] | None = None,
+        *,
+        text: str | re.Pattern[str] | None = None,
+        string: str | re.Pattern[str] | None = None,
+        selector: str | None = None,
+        role: str | None = None,
+        **kwargs: object,
+    ) -> list["WebInputElement"]:
+        return self.recorder._find_all_input_in_scope(
+            self.locator,
+            name,
+            attrs,
+            text=text,
+            string=string,
+            selector=selector,
+            role=role,
+            **kwargs,
+        )
+
+    def find_select(
+        self,
+        name: str | None = None,
+        attrs: Mapping[str, object] | None = None,
+        *,
+        text: str | re.Pattern[str] | None = None,
+        string: str | re.Pattern[str] | None = None,
+        selector: str | None = None,
+        role: str | None = None,
+        timeout_seconds: float = 10.0,
+        **kwargs: object,
+    ) -> "WebSelectElement":
+        return self.recorder._find_select_in_scope(
+            self.locator,
+            name,
+            attrs,
+            text=text,
+            string=string,
+            selector=selector,
+            role=role,
+            timeout_seconds=timeout_seconds,
+            **kwargs,
+        )
+
+    def find_all_select(
+        self,
+        name: str | None = None,
+        attrs: Mapping[str, object] | None = None,
+        *,
+        text: str | re.Pattern[str] | None = None,
+        string: str | re.Pattern[str] | None = None,
+        selector: str | None = None,
+        role: str | None = None,
+        **kwargs: object,
+    ) -> list["WebSelectElement"]:
+        return self.recorder._find_all_select_in_scope(
+            self.locator,
+            name,
+            attrs,
+            text=text,
+            string=string,
+            selector=selector,
+            role=role,
+            **kwargs,
+        )
+
 
 class WebInputElement(WebElement):
     """A form control with input-specific actions."""
@@ -224,6 +318,32 @@ class WebInputElement(WebElement):
         self.locator.clear(timeout=timeout_seconds * 1000)
         return self
 
+    def set_value(
+        self,
+        value: str | int | float,
+        *,
+        highlight: bool = True,
+    ) -> "WebInputElement":
+        """Set a control value and emit input/change events.
+
+        This is useful for controls such as ``input[type=range]`` that do not
+        behave like text fields but still expose a value.
+        """
+
+        if highlight:
+            self.highlight()
+        self.locator.evaluate(
+            """
+            (element, value) => {
+                element.value = String(value);
+                element.dispatchEvent(new Event('input', { bubbles: true }));
+                element.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            """,
+            value,
+        )
+        return self
+
     def press(self, key: str, *, timeout_seconds: float = 10.0) -> "WebInputElement":
         self.locator.press(key, timeout=timeout_seconds * 1000)
         return self
@@ -259,6 +379,29 @@ class WebInputElement(WebElement):
         timeout_seconds: float = 10.0,
         highlight: bool = True,
     ) -> "WebInputElement":
+        if highlight:
+            self.highlight()
+        self.locator.select_option(
+            value=value,
+            label=label,
+            index=index,
+            timeout=timeout_seconds * 1000,
+        )
+        return self
+
+
+class WebSelectElement(WebInputElement):
+    """A select control with select-specific actions."""
+
+    def select_option(
+        self,
+        value: str | Sequence[str] | None = None,
+        *,
+        label: str | Sequence[str] | None = None,
+        index: int | Sequence[int] | None = None,
+        timeout_seconds: float = 10.0,
+        highlight: bool = True,
+    ) -> "WebSelectElement":
         if highlight:
             self.highlight()
         self.locator.select_option(
@@ -470,6 +613,98 @@ class WebUIRecorder(DemoVideoRecorder):
             **kwargs,
         )
 
+    def find_input(
+        self,
+        name: str | None = None,
+        attrs: Mapping[str, object] | None = None,
+        *,
+        text: str | re.Pattern[str] | None = None,
+        string: str | re.Pattern[str] | None = None,
+        selector: str | None = None,
+        role: str | None = None,
+        timeout_seconds: float = 10.0,
+        **kwargs: object,
+    ) -> WebInputElement:
+        return self._find_input_in_scope(
+            self.current_page,
+            name,
+            attrs,
+            text=text,
+            string=string,
+            selector=selector,
+            role=role,
+            timeout_seconds=timeout_seconds,
+            **kwargs,
+        )
+
+    def find_all_input(
+        self,
+        name: str | None = None,
+        attrs: Mapping[str, object] | None = None,
+        *,
+        text: str | re.Pattern[str] | None = None,
+        string: str | re.Pattern[str] | None = None,
+        selector: str | None = None,
+        role: str | None = None,
+        **kwargs: object,
+    ) -> list[WebInputElement]:
+        return self._find_all_input_in_scope(
+            self.current_page,
+            name,
+            attrs,
+            text=text,
+            string=string,
+            selector=selector,
+            role=role,
+            **kwargs,
+        )
+
+    def find_select(
+        self,
+        name: str | None = None,
+        attrs: Mapping[str, object] | None = None,
+        *,
+        text: str | re.Pattern[str] | None = None,
+        string: str | re.Pattern[str] | None = None,
+        selector: str | None = None,
+        role: str | None = None,
+        timeout_seconds: float = 10.0,
+        **kwargs: object,
+    ) -> WebSelectElement:
+        return self._find_select_in_scope(
+            self.current_page,
+            name,
+            attrs,
+            text=text,
+            string=string,
+            selector=selector,
+            role=role,
+            timeout_seconds=timeout_seconds,
+            **kwargs,
+        )
+
+    def find_all_select(
+        self,
+        name: str | None = None,
+        attrs: Mapping[str, object] | None = None,
+        *,
+        text: str | re.Pattern[str] | None = None,
+        string: str | re.Pattern[str] | None = None,
+        selector: str | None = None,
+        role: str | None = None,
+        **kwargs: object,
+    ) -> list[WebSelectElement]:
+        return self._find_all_select_in_scope(
+            self.current_page,
+            name,
+            attrs,
+            text=text,
+            string=string,
+            selector=selector,
+            role=role,
+            **kwargs,
+        )
+
     def wait_for_url(
         self,
         url: str | re.Pattern[str],
@@ -559,6 +794,7 @@ class WebUIRecorder(DemoVideoRecorder):
         selector: str | None = None,
         role: str | None = None,
         timeout_seconds: float = 10.0,
+        base_selector: str | None = None,
         **kwargs: object,
     ) -> WebElement:
         locator = self._locator_for(
@@ -569,6 +805,7 @@ class WebUIRecorder(DemoVideoRecorder):
             string=string,
             selector=selector,
             role=role,
+            base_selector=base_selector,
             **kwargs,
         ).first
         try:
@@ -578,6 +815,70 @@ class WebUIRecorder(DemoVideoRecorder):
                 f"No visible web element matched {self._describe_query(name, attrs, selector, role, kwargs)}."
             ) from exc
         return self._wrap_element(locator)
+
+    def _find_input_in_scope(
+        self,
+        scope: Page | Locator,
+        name: str | None = None,
+        attrs: Mapping[str, object] | None = None,
+        *,
+        text: str | re.Pattern[str] | None = None,
+        string: str | re.Pattern[str] | None = None,
+        selector: str | None = None,
+        role: str | None = None,
+        timeout_seconds: float = 10.0,
+        **kwargs: object,
+    ) -> WebInputElement:
+        element = self._find_in_scope(
+            scope,
+            name,
+            attrs,
+            text=text,
+            string=string,
+            selector=selector,
+            role=role,
+            timeout_seconds=timeout_seconds,
+            base_selector=INPUT_SELECTOR,
+            **kwargs,
+        )
+        if not isinstance(element, WebInputElement) or isinstance(
+            element, WebSelectElement
+        ):
+            raise WebElementNotFoundError(
+                f"No visible input element matched {self._describe_query(name, attrs, selector, role, kwargs)}."
+            )
+        return element
+
+    def _find_select_in_scope(
+        self,
+        scope: Page | Locator,
+        name: str | None = None,
+        attrs: Mapping[str, object] | None = None,
+        *,
+        text: str | re.Pattern[str] | None = None,
+        string: str | re.Pattern[str] | None = None,
+        selector: str | None = None,
+        role: str | None = None,
+        timeout_seconds: float = 10.0,
+        **kwargs: object,
+    ) -> WebSelectElement:
+        element = self._find_in_scope(
+            scope,
+            name,
+            attrs,
+            text=text,
+            string=string,
+            selector=selector,
+            role=role,
+            timeout_seconds=timeout_seconds,
+            base_selector=SELECT_SELECTOR,
+            **kwargs,
+        )
+        if not isinstance(element, WebSelectElement):
+            raise WebElementNotFoundError(
+                f"No visible select element matched {self._describe_query(name, attrs, selector, role, kwargs)}."
+            )
+        return element
 
     def _find_optional_in_scope(
         self,
@@ -617,6 +918,7 @@ class WebUIRecorder(DemoVideoRecorder):
         string: str | re.Pattern[str] | None = None,
         selector: str | None = None,
         role: str | None = None,
+        base_selector: str | None = None,
         **kwargs: object,
     ) -> list[WebElement]:
         locator = self._locator_for(
@@ -627,10 +929,68 @@ class WebUIRecorder(DemoVideoRecorder):
             string=string,
             selector=selector,
             role=role,
+            base_selector=base_selector,
             **kwargs,
         )
         return [
             self._wrap_element(locator.nth(index)) for index in range(locator.count())
+        ]
+
+    def _find_all_input_in_scope(
+        self,
+        scope: Page | Locator,
+        name: str | None = None,
+        attrs: Mapping[str, object] | None = None,
+        *,
+        text: str | re.Pattern[str] | None = None,
+        string: str | re.Pattern[str] | None = None,
+        selector: str | None = None,
+        role: str | None = None,
+        **kwargs: object,
+    ) -> list[WebInputElement]:
+        return [
+            element
+            for element in self._find_all_in_scope(
+                scope,
+                name,
+                attrs,
+                text=text,
+                string=string,
+                selector=selector,
+                role=role,
+                base_selector=INPUT_SELECTOR,
+                **kwargs,
+            )
+            if isinstance(element, WebInputElement)
+            and not isinstance(element, WebSelectElement)
+        ]
+
+    def _find_all_select_in_scope(
+        self,
+        scope: Page | Locator,
+        name: str | None = None,
+        attrs: Mapping[str, object] | None = None,
+        *,
+        text: str | re.Pattern[str] | None = None,
+        string: str | re.Pattern[str] | None = None,
+        selector: str | None = None,
+        role: str | None = None,
+        **kwargs: object,
+    ) -> list[WebSelectElement]:
+        return [
+            element
+            for element in self._find_all_in_scope(
+                scope,
+                name,
+                attrs,
+                text=text,
+                string=string,
+                selector=selector,
+                role=role,
+                base_selector=SELECT_SELECTOR,
+                **kwargs,
+            )
+            if isinstance(element, WebSelectElement)
         ]
 
     def _locator_for(
@@ -643,6 +1003,7 @@ class WebUIRecorder(DemoVideoRecorder):
         string: str | re.Pattern[str] | None = None,
         selector: str | None = None,
         role: str | None = None,
+        base_selector: str | None = None,
         **kwargs: object,
     ) -> Locator:
         query_attrs = dict(attrs or {})
@@ -651,20 +1012,45 @@ class WebUIRecorder(DemoVideoRecorder):
 
         if role is not None:
             role_name = query_attrs.pop("name", None)
+            css_name = name
+            if role_name is None and name is not None:
+                role_name = name
+                css_name = None
             locator = scope.get_by_role(role, name=role_name)  # type: ignore[arg-type]
         elif "label" in query_attrs:
+            css_name = name
             locator = scope.get_by_label(str(query_attrs.pop("label")))
         elif "placeholder" in query_attrs:
+            css_name = name
             locator = scope.get_by_placeholder(str(query_attrs.pop("placeholder")))
         elif "test_id" in query_attrs:
+            css_name = name
             locator = scope.get_by_test_id(str(query_attrs.pop("test_id")))
         elif "title" in query_attrs:
+            css_name = name
             locator = scope.get_by_title(str(query_attrs.pop("title")))
         else:
-            locator = scope.locator(
-                selector or _css_selector_from_find_args(name, query_attrs)
+            css_selector = selector or _css_selector_from_find_args(name, query_attrs)
+            return self._apply_text_filter(
+                scope.locator(_combine_css_selectors(base_selector, css_selector)),
+                text_filter,
             )
 
+        remaining_selector = selector or _css_selector_from_find_args(
+            css_name, query_attrs
+        )
+        if base_selector is not None or remaining_selector != "*":
+            locator = locator.and_(
+                scope.locator(_combine_css_selectors(base_selector, remaining_selector))
+            )
+
+        return self._apply_text_filter(locator, text_filter)
+
+    def _apply_text_filter(
+        self,
+        locator: Locator,
+        text_filter: str | re.Pattern[str] | None,
+    ) -> Locator:
         if text_filter is not None:
             locator = locator.filter(has_text=text_filter)
         return locator
@@ -674,8 +1060,10 @@ class WebUIRecorder(DemoVideoRecorder):
             tag = str(locator.evaluate("element => element.tagName.toLowerCase()"))
         except Exception:
             return WebElement(self, locator)
-        if tag in {"input", "textarea", "select"}:
+        if tag in {"input", "textarea"}:
             return WebInputElement(self, locator)
+        if tag == "select":
+            return WebSelectElement(self, locator)
         if tag == "form":
             return WebFormElement(self, locator)
         return WebElement(self, locator)
@@ -723,14 +1111,26 @@ def _css_selector_from_find_args(
 ) -> str:
     selector = name or "*"
     for raw_key, raw_value in attrs.items():
-        key = "class" if raw_key == "class_" else raw_key.replace("_", "-")
+        key = "class" if raw_key in {"class_", "_class"} else raw_key.replace("_", "-")
         if raw_value is False or raw_value is None:
             continue
         if raw_value is True:
             selector += f"[{key}]"
             continue
-        selector += f"[{key}={_css_string(str(raw_value))}]"
+        operator = "~=" if key == "class" else "="
+        selector += f"[{key}{operator}{_css_string(str(raw_value))}]"
     return selector
+
+
+def _combine_css_selectors(
+    base_selector: str | None,
+    selector: str,
+) -> str:
+    if base_selector is None:
+        return selector
+    if selector == "*":
+        return base_selector
+    return f":is({base_selector}):is({selector})"
 
 
 def _css_string(value: str) -> str:

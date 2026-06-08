@@ -100,6 +100,36 @@ def test_synthesize_explanation_audio_returns_text_and_audio(tmp_path) -> None:
     )
 
 
+def test_synthesize_if_tts_enabled_returns_text_without_backend(tmp_path) -> None:
+    recorder = DemoVideoRecorder(tmp_path / "demo.mp4")
+
+    assert recorder.synthesize_if_tts_enabled("  Plain line  ") == "Plain line"
+
+
+def test_synthesize_if_tts_enabled_prepares_audio_with_backend(tmp_path) -> None:
+    class FakeTTS(TTSBackend):
+        def save_audio(self, text: str) -> Path:
+            assert text == "Prepared line"
+            audio_path = self.save_dir / "clip-0001.mp3"
+            audio_path.parent.mkdir(parents=True, exist_ok=True)
+            audio_path.write_bytes(b"mp3")
+            return audio_path
+
+        def synthesize(self, text: str) -> SynthesizedAudio:
+            return SynthesizedAudio(self.save_audio(text), 2.25)
+
+    recorder = DemoVideoRecorder(
+        tmp_path / "demo.mp4", tts=FakeTTS(save_dir=tmp_path / "tts")
+    )
+
+    assert recorder.synthesize_if_tts_enabled("  Prepared line  ") == (
+        SynthesizedExplanation(
+            text="Prepared line",
+            audio=SynthesizedAudio(tmp_path / "tts" / "clip-0001.mp3", 2.25),
+        )
+    )
+
+
 def test_demo_recorder_explain_accepts_pre_synthesized_audio(
     tmp_path, monkeypatch
 ) -> None:

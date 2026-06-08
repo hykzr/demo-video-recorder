@@ -2,7 +2,11 @@
 
 from demo_video_recorder.cli import CLIDemoRecorder, OutputMarker
 from demo_video_recorder.core import DemoVideoRecorder
-from demo_video_recorder.defaults import DEFAULTS, FAST_SMOKE_TEST_DEFAULTS, RecorderDefaults
+from demo_video_recorder.defaults import (
+    DEFAULTS,
+    FAST_SMOKE_TEST_DEFAULTS,
+    RecorderDefaults,
+)
 from demo_video_recorder.errors import (
     DemoVideoRecorderError,
     DependencyMissingError,
@@ -23,7 +27,13 @@ from demo_video_recorder.tts import (
     TTSBackend,
 )
 from demo_video_recorder.types import CaptureRegion, WindowInfo
-from demo_video_recorder.web import WebElement, WebFormElement, WebInputElement, WebUIRecorder
+from demo_video_recorder.web import (
+    WebElement,
+    WebFormElement,
+    WebInputElement,
+    WebSelectElement,
+    WebUIRecorder,
+)
 
 __all__ = [
     "CLIDemoRecorder",
@@ -48,6 +58,7 @@ __all__ = [
     "WebElementNotFoundError",
     "WebFormElement",
     "WebInputElement",
+    "WebSelectElement",
     "WebUIRecorder",
     "WindowInfo",
     "WindowNotFoundError",

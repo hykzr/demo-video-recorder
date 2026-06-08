@@ -123,7 +123,7 @@ class EdgeTTSBackend(TTSBackend):
         self,
         *,
         save_dir: str | Path,
-        speaker: str = "en-US-AvaNeural",
+        speaker: str = "en-US-AvaMultilingualNeural",
         speed: str = "+0%",
         volume: str = "+0%",
         ffprobe: str = "ffprobe",

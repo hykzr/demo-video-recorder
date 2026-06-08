@@ -99,7 +99,7 @@ from demo_video_recorder import EdgeTTSBackend
 def main():
     tts = EdgeTTSBackend(
         save_dir="out/demo.tts",
-        speaker="en-US-AvaNeural",
+        speaker="en-US-AvaMultilingualNeural",
         speed="+0%",
         volume="+0%",
     )
@@ -112,7 +112,7 @@ def main():
             start_recording=True,
             clear=True,
         )
-        prepared = r.synthesize_explanation_audio(
+        prepared = r.synthesize_if_tts_enabled(
             "The app responds to typed input while subtitles explain the action."
         )
         r.explain("Today we'll demo the main workflow.")
@@ -143,6 +143,7 @@ Useful methods:
 - `explain("...")`: adds narration subtitles and, when TTS is configured, also generates a spoken narration clip.
 - `explain(prepared_explanation)`: reuses pre-generated narration text and audio without repeating the same string literal.
 - `synthesize_explanation_audio("...")`: prepares a `SynthesizedExplanation` ahead of time so `explain()` does not need to wait on synthesis during capture.
+- `synthesize_if_tts_enabled("...")`: returns a prepared explanation when TTS is configured, or the trimmed text when it is not. Prefer it over synthesize_explanation_audio as your smoke test won't end up doing the time costly synthesize all the time. use text directly if you do not use tts at all.
 - `EdgeTTSBackend.list_speakers()`: returns available Edge voices so you can choose one that fits the audience and tone.
 - `stop_recording()`: stops capture, trims subtitles to video duration, and writes the final MP4 with subtitles and narration audio.
 - `render_narration_audio()`: exports just the synthesized narration timeline, useful for `--audio-only` test runs.
@@ -191,9 +192,10 @@ def main():
         r.serve("dist", 8000)
         r.open_web("/")
         r.explain("The local web app is open.")
-        r.find("input", placeholder="Ada Lovelace").fill("Grace Hopper")
-        r.find("button", text="Greet").click()
-        r.find("output", id="result", text="Grace Hopper").highlight()
+        r.find_input(label="Email address").fill("ada@example.com")
+        r.find_select(label="Salary tier").select_option(label="$100,000 to $150,000")
+        r.find("button", text="Review intake details").click()
+        r.find("aside", text="ada@example.com").highlight()
     finally:
         r.close()
         if r.is_recording:
@@ -207,8 +209,10 @@ Useful methods:
 - `find(...)`: bs4-style element lookup that raises `WebElementNotFoundError` when nothing visible is found.
 - `find_optional(...)`: same lookup, returning `None` when nothing is found.
 - `find_all(...)`: returns all matched elements.
+- `find_input(...)` / `find_all_input(...)`: restrict lookup to `input` and `textarea` controls and return `WebInputElement`.
+- `find_select(...)` / `find_all_select(...)`: restrict lookup to `select` controls and return `WebSelectElement`.
 - Element methods: `highlight()`, `click()`, `double_click()`, `hover()`, `wait()`, `text()`, and `attribute()`.
-- Input/control methods: `fill()`, `type()`, `clear()`, `press()`, `check()`, `uncheck()`, and `select_option()`.
+- Input/control methods: `fill()`, `type()`, `clear()`, `set_value()`, `press()`, `check()`, `uncheck()`, and `select_option()`.
 - Form methods: `submit()`.
 
 `find()` accepts `name` and attrs like Beautiful Soup, plus Playwright-friendly selectors:
@@ -216,6 +220,7 @@ Useful methods:
 ```python
 r.find("button", text="Save")
 r.find("input", {"name": "email"})
+r.find("input", _class="field-control", text="Email")
 r.find(selector="[data-testid='submit']")
 r.find(role="button", name="Continue")
 r.find(label="Email address").fill("ada@example.com")

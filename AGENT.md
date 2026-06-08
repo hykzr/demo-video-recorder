@@ -55,7 +55,7 @@ Do this before writing or running a recording script:
 11. Record the final production demo once the interaction and framing are stable.
 12. Unless otherwise specified, you do not need to create a full CLI entry point and all parameters in your recorder script; hardcoded script values are fine. Optional args are still fine when they help repeated testing.
 13. If you use TTS, pick the speaker before recording starts. Follow the user's instructions when they specify a voice; otherwise choose one that fits the project's theme and audience.
-14. TTS generation may be slow enough to show up as dead air in the capture. For pre-determined or longer narration, pre-synthesize it first with `synthesize_explanation_audio()`, then pass that prepared result into `explain(prepared_explanation)`.
+14. TTS generation may be slow enough to show up as dead air in the capture. For pre-determined or longer narration, pre-synthesize it first with `synthesize_if_tts_enabled()` when TTS is optional, or `synthesize_explanation_audio()` when TTS is required, then pass that prepared result into `explain(prepared_explanation)`.
 15. For any true, previously unknown bugs from the project to demo, please inform the user and let them decide to fix it or hide it in the demo. You do not need to demo the features that is explicitly stated as not implemented, placebo, not within scope of current development phase, have unfixed issues unless explicitly asked to
 
 ## Defaults
@@ -81,6 +81,7 @@ Useful helpers when narration audio is enabled:
 
 - `EdgeTTSBackend(save_dir=..., speaker=..., speed=..., volume=...)`
 - `tts.list_speakers()` to inspect available voices
+- `recorder.synthesize_if_tts_enabled("...")` to prepare narration when TTS is enabled and return plain text otherwise
 - `recorder.synthesize_explanation_audio("...")` to prepare narration text plus audio ahead of time
 - `recorder.explain(prepared_explanation)` to reuse pre-generated narration without blocking capture
 
@@ -107,7 +108,7 @@ from demo_video_recorder import CLIDemoRecorder, DEFAULTS, EdgeTTSBackend
 def main():
     tts = EdgeTTSBackend(
         save_dir="out/demo.tts",
-        speaker="en-US-AvaNeural",
+        speaker="en-US-AvaMultilingualNeural",
         speed="+0%",
         volume="+0%",
     )
@@ -124,10 +125,10 @@ def main():
             start_recording=True,
             clear=True,
         )
-        intro = r.synthesize_explanation_audio(
+        intro = r.synthesize_if_tts_enabled(
             "Today we'll demonstrate our new app"
         )
-        conclusion = r.synthesize_explanation_audio(
+        conclusion = r.synthesize_if_tts_enabled(
             "The help output the available actions. Thanks for watching"
         )
         r.explain(intro)
@@ -198,8 +199,10 @@ Useful helpers:
 - `find(...)` is bs4-like and raises `WebElementNotFoundError` if no visible element is found.
 - `find_optional(...)` returns `None` instead of raising.
 - `find_all(...)` returns all matched elements.
+- `find_input(...)` and `find_all_input(...)` restrict lookup to `input` and `textarea` controls.
+- `find_select(...)` and `find_all_select(...)` restrict lookup to `select` controls.
 - Element actions include `highlight()`, `click()`, `double_click()`, `hover()`, `wait()`, `text()`, and `attribute()`.
-- Input/control actions include `fill()`, `type()`, `clear()`, `press()`, `check()`, `uncheck()`, and `select_option()`.
+- Input/control actions include `fill()`, `type()`, `clear()`, `set_value()`, `press()`, `check()`, `uncheck()`, and `select_option()`.
 - Form actions include `submit()`.
 
 Prefer robust selectors in this order: role and accessible name, label/placeholder/test id, then CSS selector. Use `find_optional()` when a conditional banner, modal, or toast may or may not appear.
@@ -239,6 +242,7 @@ class DemoVideoRecorder(
 - `start_recording(*, region=None) -> DemoVideoRecorder`
 - `explain(text: str | SynthesizedExplanation, *, wait=True) -> DemoVideoRecorder`
 - `synthesize_explanation_audio(text: str) -> SynthesizedExplanation`
+- `synthesize_if_tts_enabled(text: str) -> str | SynthesizedExplanation`
 - `wait(seconds: float) -> DemoVideoRecorder`
 - `complete_explanation() -> DemoVideoRecorder`
 - `stop_recording(*, burn=None) -> Path`
@@ -295,6 +299,10 @@ class WebUIRecorder(
 - `find(name=None, attrs=None, *, text=None, string=None, selector=None, role=None, timeout_seconds=10.0, **kwargs) -> WebElement`
 - `find_optional(name=None, attrs=None, *, text=None, string=None, selector=None, role=None, timeout_seconds=2.0, **kwargs) -> WebElement | None`
 - `find_all(name=None, attrs=None, *, text=None, string=None, selector=None, role=None, **kwargs) -> list[WebElement]`
+- `find_input(name=None, attrs=None, *, text=None, string=None, selector=None, role=None, timeout_seconds=10.0, **kwargs) -> WebInputElement`
+- `find_all_input(name=None, attrs=None, *, text=None, string=None, selector=None, role=None, **kwargs) -> list[WebInputElement]`
+- `find_select(name=None, attrs=None, *, text=None, string=None, selector=None, role=None, timeout_seconds=10.0, **kwargs) -> WebSelectElement`
+- `find_all_select(name=None, attrs=None, *, text=None, string=None, selector=None, role=None, **kwargs) -> list[WebSelectElement]`
 - `wait_for_url(url, *, timeout_seconds=10.0) -> WebUIRecorder`
 - `stop_recording(*, burn=None) -> Path`
 - `close() -> None`
@@ -310,7 +318,7 @@ class WebElement
 - `hover(*, timeout_seconds=10.0) -> WebElement`
 - `text(*, timeout_seconds=10.0) -> str`
 - `attribute(name, *, timeout_seconds=10.0) -> str | None`
-- `find(...)`, `find_optional(...)`, and `find_all(...)` scoped to that element.
+- `find(...)`, `find_optional(...)`, `find_all(...)`, `find_input(...)`, `find_all_input(...)`, `find_select(...)`, and `find_all_select(...)` scoped to that element.
 
 ```python
 class WebInputElement(WebElement)
@@ -319,10 +327,17 @@ class WebInputElement(WebElement)
 - `fill(value, *, timeout_seconds=10.0, highlight=True) -> WebInputElement`
 - `type(text, *, delay_ms=None, timeout_seconds=10.0, highlight=True) -> WebInputElement`
 - `clear(*, timeout_seconds=10.0, highlight=True) -> WebInputElement`
+- `set_value(value, *, highlight=True) -> WebInputElement`
 - `press(key, *, timeout_seconds=10.0) -> WebInputElement`
 - `check(*, timeout_seconds=10.0, highlight=True) -> WebInputElement`
 - `uncheck(*, timeout_seconds=10.0, highlight=True) -> WebInputElement`
 - `select_option(value=None, *, label=None, index=None, timeout_seconds=10.0, highlight=True) -> WebInputElement`
+
+```python
+class WebSelectElement(WebInputElement)
+```
+
+- `select_option(value=None, *, label=None, index=None, timeout_seconds=10.0, highlight=True) -> WebSelectElement`
 
 ```python
 class WebFormElement(WebElement)
@@ -345,7 +360,7 @@ class TTSBackend(*, save_dir, ffprobe="ffprobe")
 class EdgeTTSBackend(
     *,
     save_dir,
-    speaker="en-US-AvaNeural",
+    speaker="en-US-AvaMultilingualNeural",
     speed="+0%",
     volume="+0%",
     ffprobe="ffprobe",

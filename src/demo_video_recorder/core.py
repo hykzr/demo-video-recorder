@@ -246,6 +246,14 @@ class DemoVideoRecorder:
         trimmed = text.strip()
         return SynthesizedExplanation(text=trimmed, audio=self.tts.synthesize(trimmed))
 
+    def synthesize_if_tts_enabled(self, text: str) -> str | SynthesizedExplanation:
+        """Pre-synthesize narration only when a TTS backend is configured."""
+
+        trimmed = text.strip()
+        if self.tts is None:
+            return trimmed
+        return self.synthesize_explanation_audio(trimmed)
+
     def wait(self, seconds: float) -> "DemoVideoRecorder":
         time.sleep(seconds)
         return self

@@ -75,7 +75,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--tts-speaker",
-        default="en-US-AvaNeural",
+        default="en-US-AvaMultilingualNeural",
         help="Edge TTS speaker/voice name.",
     )
     parser.add_argument(
