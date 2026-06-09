@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+import asyncio
 from pathlib import Path
 import shutil
 import platform
@@ -23,6 +25,7 @@ from demo_video_recorder.types import CaptureRegion, WindowInfo
 from demo_video_recorder import windowing
 
 Command = str | Sequence[str]
+PreparedCue = str | SynthesizedExplanation
 CAPTURE_SYNC_THRESHOLD_SECONDS = 0.05
 
 
@@ -246,6 +249,19 @@ class DemoVideoRecorder:
         trimmed = text.strip()
         return SynthesizedExplanation(text=trimmed, audio=self.tts.synthesize(trimmed))
 
+    async def synthesize_explanation_audio_async(
+        self, text: str
+    ) -> SynthesizedExplanation:
+        """Async variant of ``synthesize_explanation_audio()``."""
+
+        if self.tts is None:
+            raise RecordingError("Narration audio was requested, but TTS is disabled.")
+        trimmed = text.strip()
+        return SynthesizedExplanation(
+            text=trimmed,
+            audio=await self.tts.synthesize_async(trimmed),
+        )
+
     def synthesize_if_tts_enabled(self, text: str) -> str | SynthesizedExplanation:
         """Pre-synthesize narration only when a TTS backend is configured."""
 
@@ -253,6 +269,46 @@ class DemoVideoRecorder:
         if self.tts is None:
             return trimmed
         return self.synthesize_explanation_audio(trimmed)
+
+    async def synthesize_if_tts_enabled_async(
+        self, text: str
+    ) -> str | SynthesizedExplanation:
+        """Async variant of ``synthesize_if_tts_enabled()``."""
+
+        trimmed = text.strip()
+        if self.tts is None:
+            return trimmed
+        return await self.synthesize_explanation_audio_async(trimmed)
+
+    def prepare_cues(
+        self,
+        lines: Iterable[str],
+        *,
+        async_tts: bool = False,
+    ) -> list[PreparedCue]:
+        """Prepare multiple narration cues before recording starts.
+
+        With ``async_tts=False`` this prepares cues one at a time. With
+        ``async_tts=True`` it runs the async variant concurrently with
+        ``asyncio.run()``. If called from existing async code, use
+        ``await recorder.prepare_cues_async(...)`` instead.
+        """
+
+        if async_tts:
+            return asyncio.run(self.prepare_cues_async(lines))
+        return [self.synthesize_if_tts_enabled(line) for line in lines]
+
+    async def prepare_cues_async(
+        self,
+        lines: Iterable[str],
+    ) -> list[PreparedCue]:
+        """Prepare multiple narration cues concurrently before recording starts."""
+
+        return list(
+            await asyncio.gather(
+                *(self.synthesize_if_tts_enabled_async(line) for line in lines)
+            )
+        )
 
     def wait(self, seconds: float) -> "DemoVideoRecorder":
         time.sleep(seconds)

@@ -1,12 +1,20 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 import subprocess
-import types
 
 import pytest
 
-from demo_video_recorder import DemoVideoRecorder, EdgeTTSBackend, TTSBackend
+from demo_video_recorder import (
+    DemoVideoRecorder,
+    EdgeTTSBackend,
+    MacOSTTSBackend,
+    NativeTTSBackend,
+    TTSBackend,
+    WindowsTTSBackend,
+)
+from demo_video_recorder.errors import DependencyMissingError, RecordingError
 from demo_video_recorder.subtitles import CueDisplay
 from demo_video_recorder.tts import (
     NarrationClip,
@@ -128,6 +136,238 @@ def test_synthesize_if_tts_enabled_prepares_audio_with_backend(tmp_path) -> None
             audio=SynthesizedAudio(tmp_path / "tts" / "clip-0001.mp3", 2.25),
         )
     )
+
+
+def test_synthesize_if_tts_enabled_async_prepares_audio(tmp_path) -> None:
+    class FakeTTS(TTSBackend):
+        def save_audio(self, text: str) -> Path:
+            assert text == "Prepared line"
+            audio_path = self.save_dir / "clip-0001.mp3"
+            audio_path.parent.mkdir(parents=True, exist_ok=True)
+            audio_path.write_bytes(b"mp3")
+            return audio_path
+
+        async def synthesize_async(self, text: str) -> SynthesizedAudio:
+            return SynthesizedAudio(self.save_audio(text), 2.25)
+
+    recorder = DemoVideoRecorder(
+        tmp_path / "demo.mp4", tts=FakeTTS(save_dir=tmp_path / "tts")
+    )
+
+    result = asyncio.run(recorder.synthesize_if_tts_enabled_async("  Prepared line  "))
+
+    assert result == (
+        SynthesizedExplanation(
+            text="Prepared line",
+            audio=SynthesizedAudio(tmp_path / "tts" / "clip-0001.mp3", 2.25),
+        )
+    )
+
+
+def test_prepare_cues_uses_recorder_sync_preparation(tmp_path) -> None:
+    recorder = DemoVideoRecorder(tmp_path / "demo.mp4")
+
+    assert recorder.prepare_cues(["  First cue  ", "Second cue"]) == [
+        "First cue",
+        "Second cue",
+    ]
+
+
+def test_prepare_cues_async_uses_recorder_async_preparation(tmp_path) -> None:
+    class FakeTTS(TTSBackend):
+        async def synthesize_async(self, text: str) -> SynthesizedAudio:
+            path = self.save_dir / f"{text}.mp3"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"mp3")
+            return SynthesizedAudio(path, 1.0)
+
+        def save_audio(self, text: str) -> Path:
+            raise AssertionError(f"unexpected sync synthesis: {text}")
+
+    recorder = DemoVideoRecorder(
+        tmp_path / "demo.mp4", tts=FakeTTS(save_dir=tmp_path / "tts")
+    )
+
+    result = asyncio.run(recorder.prepare_cues_async(["First cue", "Second cue"]))
+
+    assert result == [
+        SynthesizedExplanation(
+            "First cue",
+            SynthesizedAudio(tmp_path / "tts" / "First cue.mp3", 1.0),
+        ),
+        SynthesizedExplanation(
+            "Second cue",
+            SynthesizedAudio(tmp_path / "tts" / "Second cue.mp3", 1.0),
+        ),
+    ]
+
+
+def test_prepare_cues_can_run_async_preparation_from_sync_code(tmp_path) -> None:
+    class FakeTTS(TTSBackend):
+        async def synthesize_async(self, text: str) -> SynthesizedAudio:
+            path = self.save_dir / f"{text}.mp3"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"mp3")
+            return SynthesizedAudio(path, 1.0)
+
+        def save_audio(self, text: str) -> Path:
+            raise AssertionError(f"unexpected sync synthesis: {text}")
+
+    recorder = DemoVideoRecorder(
+        tmp_path / "demo.mp4", tts=FakeTTS(save_dir=tmp_path / "tts")
+    )
+
+    result = recorder.prepare_cues(["First cue"], async_tts=True)
+
+    assert result == [
+        SynthesizedExplanation(
+            "First cue",
+            SynthesizedAudio(tmp_path / "tts" / "First cue.mp3", 1.0),
+        ),
+    ]
+
+
+def test_edge_tts_cache_reuses_existing_clip(tmp_path, monkeypatch) -> None:
+    calls: list[str] = []
+
+    class FakeCommunicate:
+        def __init__(self, text: str, speaker: str, *, rate: str, volume: str) -> None:
+            calls.append(text)
+
+        def save_sync(self, output_path: str) -> None:
+            Path(output_path).write_bytes(b"mp3")
+
+    monkeypatch.setattr("demo_video_recorder.tts.shutil.which", lambda _: "/bin/ffprobe")
+    monkeypatch.setattr("demo_video_recorder.tts.edge_tts.Communicate", FakeCommunicate)
+    monkeypatch.setattr(
+        "demo_video_recorder.tts.subprocess.run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "1.0\n", ""),
+    )
+
+    tts = EdgeTTSBackend(save_dir=tmp_path / "tts", cache=True)
+
+    first = tts.synthesize("Reuse this line")
+    second = tts.synthesize("Reuse this line")
+    tts.cleanup()
+
+    assert calls == ["Reuse this line"]
+    assert first == second
+    assert first.path.exists()
+
+
+def test_edge_tts_failure_reports_backend_context(tmp_path, monkeypatch) -> None:
+    class FakeCommunicate:
+        def __init__(self, text: str, speaker: str, *, rate: str, volume: str) -> None:
+            pass
+
+        def save_sync(self, output_path: str) -> None:
+            raise RuntimeError("NoAudioReceived")
+
+    monkeypatch.setattr("demo_video_recorder.tts.shutil.which", lambda _: "/bin/ffprobe")
+    monkeypatch.setattr("demo_video_recorder.tts.edge_tts.Communicate", FakeCommunicate)
+    tts = EdgeTTSBackend(
+        save_dir=tmp_path / "tts",
+        speaker="en-US-AvaMultilingualNeural",
+        speed="+0%",
+        volume="+0%",
+    )
+
+    with pytest.raises(RecordingError) as exc_info:
+        tts.synthesize("This should fail")
+
+    message = str(exc_info.value)
+    assert "Edge TTS synthesis failed" in message
+    assert "error_type=RuntimeError" in message
+    assert "NoAudioReceived" in message
+    assert "speaker='en-US-AvaMultilingualNeural'" in message
+
+
+def test_macos_tts_backend_uses_say_command(tmp_path, monkeypatch) -> None:
+    run_calls: list[list[str]] = []
+
+    monkeypatch.setattr("demo_video_recorder.tts.shutil.which", lambda _: "/usr/bin/say")
+
+    def fake_run(command, **kwargs):
+        run_calls.append(command)
+        Path(command[command.index("-o") + 1]).write_bytes(b"aiff")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr("demo_video_recorder.tts.subprocess.run", fake_run)
+
+    backend = MacOSTTSBackend(
+        save_dir=tmp_path / "tts",
+        speaker="Samantha",
+        words_per_minute=170,
+    )
+
+    path = backend.save_audio("Hello from macOS")
+
+    assert path.suffix == ".aiff"
+    assert path.read_bytes() == b"aiff"
+    assert run_calls[0] == [
+        "say",
+        "-v",
+        "Samantha",
+        "-r",
+        "170",
+        "-o",
+        str(path),
+        "--",
+        "Hello from macOS",
+    ]
+
+
+def test_windows_tts_backend_uses_powershell_sapi(tmp_path, monkeypatch) -> None:
+    recorded: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "demo_video_recorder.tts.shutil.which", lambda _: r"C:\Windows\System32\powershell.exe"
+    )
+
+    def fake_run(command, **kwargs):
+        recorded["command"] = command
+        recorded["env"] = kwargs["env"]
+        output_path = Path(kwargs["env"]["DEMO_TTS_OUTPUT"])
+        output_path.write_bytes(b"wav")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr("demo_video_recorder.tts.subprocess.run", fake_run)
+
+    backend = WindowsTTSBackend(
+        save_dir=tmp_path / "tts",
+        speaker="Microsoft Zira Desktop",
+        rate=1,
+        volume=90,
+    )
+
+    path = backend.save_audio("Hello from Windows")
+
+    assert path.suffix == ".wav"
+    assert path.read_bytes() == b"wav"
+    assert recorded["command"][:5] == [
+        "powershell.exe",
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+    ]
+    env = recorded["env"]
+    assert env["DEMO_TTS_TEXT"] == "Hello from Windows"
+    assert env["DEMO_TTS_VOICE"] == "Microsoft Zira Desktop"
+    assert env["DEMO_TTS_RATE"] == "1"
+    assert env["DEMO_TTS_VOLUME"] == "90"
+
+
+def test_native_tts_backend_selects_platform_backend(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("demo_video_recorder.tts.platform.system", lambda: "Darwin")
+    assert isinstance(NativeTTSBackend(save_dir=tmp_path / "mac"), MacOSTTSBackend)
+
+    monkeypatch.setattr("demo_video_recorder.tts.platform.system", lambda: "Windows")
+    assert isinstance(NativeTTSBackend(save_dir=tmp_path / "win"), WindowsTTSBackend)
+
+    monkeypatch.setattr("demo_video_recorder.tts.platform.system", lambda: "Linux")
+    with pytest.raises(DependencyMissingError):
+        NativeTTSBackend(save_dir=tmp_path / "linux")
 
 
 def test_demo_recorder_explain_accepts_pre_synthesized_audio(

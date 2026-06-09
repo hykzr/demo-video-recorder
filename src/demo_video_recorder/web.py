@@ -148,7 +148,7 @@ class WebElement:
             selector=selector,
             role=role,
             timeout_seconds=timeout_seconds,
-            **kwargs,
+            **kwargs,  # type: ignore
         )
 
     def find_optional(

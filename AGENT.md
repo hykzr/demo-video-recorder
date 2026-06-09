@@ -4,7 +4,7 @@ Use `demo-video-recorder` when the user asks for an automated demo video of a pr
 
 ## What It Is
 
-`demo-video-recorder` is a Python library for scripted demo capture. It records terminal or app windows to MP4, burns subtitles into the video, and can optionally synthesize narration audio with TTS. It is meant for used as utils in project-specific recording scripts
+`demo-video-recorder` is a Python library for scripted demo capture. It records terminal or app windows to MP4, burns subtitles into the video, and can optionally synthesize narration audio with TTS. It is meant to be used as utilities in project-specific recording scripts.
 
 ## Availability Check
 
@@ -36,27 +36,37 @@ Do this before writing or running a recording script:
    - Confirm the chosen backend is importable and usable in the active environment.
    - For `EdgeTTSBackend`, a simple preflight is `python -c "import edge_tts"`.
    - Use `list_speakers()` before recording when you need to inspect available voices.
+   - Prefer Edge TTS for final narration. Use the native macOS/Windows backend only after Edge TTS fails for an unfixable reason such as repeated service-side `NoAudioReceived` or a network/service problem outside the project.
 
 ## Workflow
 
-1. Inspect the target project first. Identify the workflow that demonstrate the main features and anything else required from the user.
+1. Inspect the target project first. Identify the workflow that demonstrates the main features and anything else required from the user.
 2. Create a recording script, usually `record_demo.py`, that imports the recorder.
 3. Prefer `CLIDemoRecorder` for terminal apps, `WebUIRecorder` for browser apps, and `DemoVideoRecorder` for native GUI windows.
 4. Record to `out/<project>-demo.mp4`, or the required location by user; if unspecified, keep generated output out of source control.
 5. Follow the user's prompt first for speed, pauses, tone, and coverage. If they do not specify speed, use `DEFAULTS` from the library.
 6. Follow the user's requested tone when given. Otherwise use a human live-demo style: natural, somewhat casual or lightly humorous, but still accurate and comprehensive. Unless otherwise specified, the subject should be `I` or `we`, not "the recorder", "the tool", or similar detached phrasing.
-7. Use `explain()` before or after each visible action so the final video has useful burned subtitles, and spoken narration too when TTS is configured.
-8. For interactive CLI apps, read the app output and react to it. Do not hardcode brittle input if the app is stateful or nondeterministic.
-9. Run the script yourself. First run a fast smoke test, then fix timing, startup, focus, and input issues until the demo completes cleanly.
-10. Check the actual video output, not just the script exit code.
+7. Keep every narration cue short: at most 25 words, and short enough to burn as no more than 2 subtitle lines. It is fine to speak several short clips sequentially.
+8. Use `explain()` before or after each visible action so the final video has useful burned subtitles, and spoken narration too when TTS is configured.
+9. For interactive CLI apps, read the app output and react to it. Do not hardcode brittle input if the app is stateful or nondeterministic.
+10. For Web UI apps, highlight important non-interactive results too, not only controls. After a click, scroll/highlight the confirmation, computed output, chart, table row, toast, or result panel so the viewer can see what changed.
+11. Run the script yourself in stages.
+    - First run a fast smoke test with TTS disabled and with animations/motion disabled or minimized.
+    - Add script options such as `--smoke`, `--no-tts`, and `--no-animation` when that helps repeated testing.
+    - In smoke/no-animation mode, use `FAST_SMOKE_TEST_DEFAULTS`, `typed_character_delay=0`, no Playwright `slow_mo_ms`, shorter waits, and `highlight=False` or shorter highlight durations where appropriate.
+    - Fix timing, startup, focus, input, scrolling, and selector issues before enabling narration audio.
+12. Monitor every smoke and final pass. If a step is waiting forever, interrupt, inspect logs/processes/output files, and fix the script. Be patient too: browser startup, app boot, ffmpeg burn-in, and TTS generation can legitimately take several minutes.
+13. Check the actual video output, not just the script exit code.
     - Use `ffprobe` to confirm the file exists, has non-zero duration, and has the expected dimensions.
     - Extract representative frames with `ffmpeg`, read those images, and verify the video is not blank, cropped, or missing subtitles.
     - If the user did not already request a window size, use those extracted frames to choose an optimal terminal or app window size for readability before the final pass.
-11. Record the final production demo once the interaction and framing are stable.
-12. Unless otherwise specified, you do not need to create a full CLI entry point and all parameters in your recorder script; hardcoded script values are fine. Optional args are still fine when they help repeated testing.
-13. If you use TTS, pick the speaker before recording starts. Follow the user's instructions when they specify a voice; otherwise choose one that fits the project's theme and audience.
-14. TTS generation may be slow enough to show up as dead air in the capture. For pre-determined or longer narration, pre-synthesize it first with `synthesize_if_tts_enabled()` when TTS is optional, or `synthesize_explanation_audio()` when TTS is required, then pass that prepared result into `explain(prepared_explanation)`.
-15. For any true, previously unknown bugs from the project to demo, please inform the user and let them decide to fix it or hide it in the demo. You do not need to demo the features that is explicitly stated as not implemented, placebo, not within scope of current development phase, have unfixed issues unless explicitly asked to
+14. Record the final production demo once the interaction and framing are stable.
+15. Do not remove the recording script unless the user explicitly asks. Keep it so the explanation, selectors, timing, and demo logic can be polished in later passes.
+16. Unless otherwise specified, you do not need to create a full CLI entry point and all parameters in your recorder script; hardcoded script values are fine. Optional args are still fine when they help repeated testing.
+17. If you use TTS, pick the speaker before recording starts. Follow the user's instructions when they specify a voice; otherwise choose one that fits the project's theme and audience.
+18. TTS generation may be slow enough to show up as dead air in the capture. For pre-determined narration, pre-synthesize it before the visible interaction starts with `synthesize_if_tts_enabled()` when TTS is optional, or `synthesize_explanation_audio()` when TTS is required, then pass that prepared result into `explain(prepared_explanation)`.
+19. For many narration clips, use the async variants before recording starts so clips can be prepared while the app is still outside the captured timeline. Use `cache=True` on the TTS backend to reuse previously generated clips across reruns.
+20. For any true, previously unknown bugs from the project to demo, please inform the user and let them decide to fix it or hide it in the demo. You do not need to demo features that are explicitly stated as not implemented, placebo, not within scope of the current development phase, or known to have unfixed issues unless explicitly asked to.
 
 ## Defaults
 
@@ -79,11 +89,38 @@ DEFAULTS.video_scale_width      # 1280
 
 Useful helpers when narration audio is enabled:
 
-- `EdgeTTSBackend(save_dir=..., speaker=..., speed=..., volume=...)`
+- `EdgeTTSBackend(save_dir=..., speaker=..., speed=..., volume=..., cache=True)` for final narration with reusable clips
+- `NativeTTSBackend(save_dir=..., speaker=..., cache=True)` to select macOS `say` or Windows SAPI when Edge TTS has an unfixable failure
+- `MacOSTTSBackend(save_dir=..., speaker=..., words_per_minute=..., cache=True)` for explicit macOS native TTS
+- `WindowsTTSBackend(save_dir=..., speaker=..., rate=..., volume=..., cache=True)` for explicit Windows native TTS
 - `tts.list_speakers()` to inspect available voices
 - `recorder.synthesize_if_tts_enabled("...")` to prepare narration when TTS is enabled and return plain text otherwise
 - `recorder.synthesize_explanation_audio("...")` to prepare narration text plus audio ahead of time
+- `await recorder.synthesize_if_tts_enabled_async("...")` or `await recorder.synthesize_explanation_audio_async("...")` to prepare clips from async code
+- `recorder.prepare_cues(lines, async_tts=True)` to prepare several clips before capture without duplicating helper code
+- `await recorder.prepare_cues_async(lines)` when already inside async code
 - `recorder.explain(prepared_explanation)` to reuse pre-generated narration without blocking capture
+
+Prefer this loop:
+
+1. Smoke test with no TTS.
+2. Finalize selectors, scrolling, highlights, and result framing.
+3. Pre-synthesize cached TTS clips before capture.
+4. Record the final narrated pass.
+
+Example pre-synthesis:
+
+```python
+intro, conclusion = recorder.prepare_cues(
+    [
+        "Let's run a fast walkthrough.",
+        "The final result is now visible.",
+    ],
+    async_tts=True,
+)
+```
+
+If Edge TTS fails, read the full exception. The backend reports speaker, speed, volume, text length, output path, and the original error type/message. First check whether the issue is a bad voice/parameter, missing network access, or a transient service failure. Only switch to `NativeTTSBackend`, `MacOSTTSBackend`, or `WindowsTTSBackend` after the Edge issue is clearly unfixable for the recording run.
 
 ## Output-Aware CLI Demos
 
@@ -111,6 +148,7 @@ def main():
         speaker="en-US-AvaMultilingualNeural",
         speed="+0%",
         volume="+0%",
+        cache=True,
     )
     r = CLIDemoRecorder(
         "out/demo.mp4",
@@ -125,11 +163,9 @@ def main():
             start_recording=True,
             clear=True,
         )
-        intro = r.synthesize_if_tts_enabled(
-            "Today we'll demonstrate our new app"
-        )
+        intro = r.synthesize_if_tts_enabled("Today we'll demonstrate our new app.")
         conclusion = r.synthesize_if_tts_enabled(
-            "The help output the available actions. Thanks for watching"
+            "The help output shows the available actions."
         )
         r.explain(intro)
         r.run(["python", "app.py"], interactive=True, command_label="python app.py")
@@ -138,6 +174,7 @@ def main():
         r.input("help")
         r.expect_output("Commands", since=marker)
         r.explain(conclusion)
+        r.explain("That gives us a clean stopping point.")
         r.input("quit")
         r.stop_app()
     finally:
@@ -184,7 +221,7 @@ def main():
         r.explain("The app is open in a browser.")
         r.find("input", placeholder="Email").fill("ada@example.com")
         r.find(role="button", name="Continue").click()
-        r.find("main", text="Welcome")
+        r.find("main", text="Welcome").highlight()
         r.explain("The page confirms that the workflow completed.")
     finally:
         r.close()
@@ -202,6 +239,7 @@ Useful helpers:
 - `find_input(...)` and `find_all_input(...)` restrict lookup to `input` and `textarea` controls.
 - `find_select(...)` and `find_all_select(...)` restrict lookup to `select` controls.
 - Element actions include `highlight()`, `click()`, `double_click()`, `hover()`, `wait()`, `text()`, and `attribute()`. Highlights smooth-scroll the target into view.
+- Highlight non-interactive results after actions too: status text, generated answers, charts, tables, metrics, toasts, and result panels.
 - Input/control actions include `fill()`, `type()`, `clear()`, `set_value()`, `set_range()`, `set_date()`, `set_color()`, `set_files()`, `press()`, `check()`, `uncheck()`, and `select_option()`.
 - Prefer the specific visual actions for native controls: `select_option()` shows options, `set_date()` shows a calendar, `set_color()` shows color swatches, `set_range()` animates movement, and radio/checkbox checks highlight the containing field.
 - Form actions include `submit()`.
@@ -243,7 +281,11 @@ class DemoVideoRecorder(
 - `start_recording(*, region=None) -> DemoVideoRecorder`
 - `explain(text: str | SynthesizedExplanation, *, wait=True) -> DemoVideoRecorder`
 - `synthesize_explanation_audio(text: str) -> SynthesizedExplanation`
+- `synthesize_explanation_audio_async(text: str) -> SynthesizedExplanation`
 - `synthesize_if_tts_enabled(text: str) -> str | SynthesizedExplanation`
+- `synthesize_if_tts_enabled_async(text: str) -> str | SynthesizedExplanation`
+- `prepare_cues(lines, *, async_tts=False) -> list[str | SynthesizedExplanation]`
+- `prepare_cues_async(lines) -> list[str | SynthesizedExplanation]`
 - `wait(seconds: float) -> DemoVideoRecorder`
 - `complete_explanation() -> DemoVideoRecorder`
 - `stop_recording(*, burn=None) -> Path`
@@ -353,10 +395,11 @@ class WebFormElement(WebElement)
 ### TTS
 
 ```python
-class TTSBackend(*, save_dir, ffprobe="ffprobe")
+class TTSBackend(*, save_dir, ffprobe="ffprobe", cache=False)
 ```
 
 - `synthesize(text: str) -> SynthesizedAudio`
+- `synthesize_async(text: str) -> SynthesizedAudio`
 - `cleanup() -> None`
 - `list_speakers() -> list[str]`
 - `save_audio(text: str) -> Path` (abstract)
@@ -369,10 +412,53 @@ class EdgeTTSBackend(
     speed="+0%",
     volume="+0%",
     ffprobe="ffprobe",
+    cache=False,
 )
 ```
 
 - Inherits `TTSBackend`.
+- `save_audio(text: str) -> Path`
+- `list_speakers() -> list[str]`
+
+```python
+NativeTTSBackend(*, save_dir, speaker=None, ffprobe="ffprobe", cache=False, **kwargs)
+```
+
+- Returns `MacOSTTSBackend` on macOS and `WindowsTTSBackend` on Windows.
+- Raises `DependencyMissingError` on other platforms.
+
+```python
+class MacOSTTSBackend(
+    *,
+    save_dir,
+    speaker=None,
+    words_per_minute=None,
+    ffprobe="ffprobe",
+    command="say",
+    cache=False,
+)
+```
+
+- Inherits `TTSBackend`.
+- Uses the macOS `say` command.
+- `save_audio(text: str) -> Path`
+- `list_speakers() -> list[str]`
+
+```python
+class WindowsTTSBackend(
+    *,
+    save_dir,
+    speaker=None,
+    rate=0,
+    volume=100,
+    ffprobe="ffprobe",
+    command="powershell.exe",
+    cache=False,
+)
+```
+
+- Inherits `TTSBackend`.
+- Uses native Windows SAPI through PowerShell.
 - `save_audio(text: str) -> Path`
 - `list_speakers() -> list[str]`
 

@@ -12,6 +12,7 @@ from demo_video_recorder import (
     DEFAULTS,
     EdgeTTSBackend,
     FAST_SMOKE_TEST_DEFAULTS,
+    NativeTTSBackend,
     WebUIRecorder,
 )
 
@@ -43,14 +44,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Use shorter pauses for quick local smoke tests.",
     )
     parser.add_argument(
+        "--no-record",
+        action="store_true",
+        help="Run the scripted browser demo without screen capture.",
+    )
+    parser.add_argument(
         "--tts",
         action="store_true",
-        help="Use Edge TTS so explain() also produces narration audio.",
+        help="Use TTS so explain() also produces narration audio.",
+    )
+    parser.add_argument(
+        "--backend",
+        choices=("edge", "native"),
+        default="edge",
+        help="TTS backend to use when narration audio is enabled.",
     )
     parser.add_argument(
         "--tts-speaker",
-        default="en-US-AvaMultilingualNeural",
-        help="Edge TTS speaker/voice name.",
+        default=None,
+        help="TTS speaker/voice name. Defaults to the selected backend default.",
     )
     parser.add_argument(
         "--tts-speed",
@@ -68,6 +80,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Directory for intermediate per-line TTS clips.",
     )
     parser.add_argument(
+        "--cache-tts",
+        action="store_true",
+        dest="cache_tts",
+        default=True,
+        help="Reuse generated TTS clips between runs.",
+    )
+    parser.add_argument(
+        "--async",
+        action="store_true",
+        dest="async_tts",
+        help="Pre-synthesize known narration clips concurrently before recording.",
+    )
+    parser.add_argument(
         "--keep-tts-audio",
         action="store_true",
         help="Keep the generated per-line TTS clips and mixed narration track.",
@@ -75,9 +100,26 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--list-speakers",
         action="store_true",
-        help="Print available Edge TTS speakers and exit.",
+        help="Print available speakers for the selected TTS backend and exit.",
     )
     return parser
+
+
+def build_tts_backend(args: argparse.Namespace, save_dir: Path):
+    if args.backend == "native":
+        return NativeTTSBackend(
+            save_dir=save_dir,
+            speaker=args.tts_speaker,
+            cache=args.cache_tts,
+        )
+
+    return EdgeTTSBackend(
+        save_dir=save_dir,
+        speaker=args.tts_speaker or "en-US-AvaMultilingualNeural",
+        speed=args.tts_speed,
+        volume=args.tts_volume,
+        cache=args.cache_tts,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -90,12 +132,7 @@ def main(argv: list[str] | None = None) -> int:
         else output_path.with_name(f"{output_path.stem}.tts")
     )
     tts_backend = (
-        EdgeTTSBackend(
-            save_dir=tts_save_dir,
-            speaker=args.tts_speaker,
-            speed=args.tts_speed,
-            volume=args.tts_volume,
-        )
+        build_tts_backend(args, tts_save_dir)
         if args.tts or args.list_speakers
         else None
     )
@@ -116,26 +153,28 @@ def main(argv: list[str] | None = None) -> int:
     )
     final_path: Path | None = None
 
-    intro = recorder.synthesize_if_tts_enabled("Let's fill out this member intake form")
-    contact_details = recorder.synthesize_if_tts_enabled(
-        "I'll start with the contact details: name, email, phone, and address."
-    )
-    profile_details = recorder.synthesize_if_tts_enabled(
-        "Then I'll choose a date of birth and preferred color so the native-style pickers are visible in the recording."
-    )
-    preferences = recorder.synthesize_if_tts_enabled(
-        "Next come the preference fields: gender, a salary tier, and a travel-readiness slider."
-    )
-    finish = recorder.synthesize_if_tts_enabled(
-        "Finally, I'll add a note, accept the terms, and review the submitted details."
-    )
-    conclusion = recorder.synthesize_if_tts_enabled(
-        "The review panel now confirms the intake details, so the form is ready for the next step."
+    (
+        intro,
+        contact_details,
+        profile_details,
+        preferences,
+        finish,
+        conclusion,
+    ) = recorder.prepare_cues(
+        [
+            "Let's fill out this member intake form.",
+            "I'll start with name, email, phone, and address.",
+            "Next, I'll choose a birthday and a preferred color.",
+            "Now come gender, salary tier, and travel readiness.",
+            "Finally, I'll add notes, accept terms, and review.",
+            "The review panel confirms the submitted intake details.",
+        ],
+        async_tts=args.async_tts,
     )
 
     try:
         recorder.serve(WEB_APP, args.port)
-        recorder.open_web("/")
+        recorder.open_web("/", start_recording=not args.no_record)
         recorder.explain(intro)
 
         recorder.explain(contact_details)
@@ -172,6 +211,11 @@ def main(argv: list[str] | None = None) -> int:
         recorder.find("aside", text="1991-08-14")
         recorder.find("aside", text="Accepted")
         recorder.explain(conclusion)
+
+        if args.no_record and args.tts:
+            final_path = recorder.render_narration_audio(
+                output_path.with_suffix(".m4a")
+            )
     finally:
         recorder.close()
         if recorder.is_recording:

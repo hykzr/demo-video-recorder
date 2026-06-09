@@ -1,7 +1,7 @@
 """Public API for demo-video-recorder."""
 
 from demo_video_recorder.cli import CLIDemoRecorder, OutputMarker
-from demo_video_recorder.core import DemoVideoRecorder
+from demo_video_recorder.core import DemoVideoRecorder, PreparedCue
 from demo_video_recorder.defaults import (
     DEFAULTS,
     FAST_SMOKE_TEST_DEFAULTS,
@@ -21,10 +21,13 @@ from demo_video_recorder.macos import (
 )
 from demo_video_recorder.tts import (
     EdgeTTSBackend,
+    MacOSTTSBackend,
     NarrationClip,
+    NativeTTSBackend,
     SynthesizedAudio,
     SynthesizedExplanation,
     TTSBackend,
+    WindowsTTSBackend,
 )
 from demo_video_recorder.types import CaptureRegion, WindowInfo
 from demo_video_recorder.web import (
@@ -45,9 +48,12 @@ __all__ = [
     "DependencyMissingError",
     "EdgeTTSBackend",
     "FAST_SMOKE_TEST_DEFAULTS",
+    "MacOSTTSBackend",
     "NarrationClip",
+    "NativeTTSBackend",
     "OutputMarker",
     "ProcessError",
+    "PreparedCue",
     "RecorderDefaults",
     "RecordingError",
     "ScreenRecordingAccessResult",
@@ -60,6 +66,7 @@ __all__ = [
     "WebInputElement",
     "WebSelectElement",
     "WebUIRecorder",
+    "WindowsTTSBackend",
     "WindowInfo",
     "WindowNotFoundError",
 ]

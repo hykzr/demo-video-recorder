@@ -185,6 +185,7 @@ tts = EdgeTTSBackend(
     speaker="en-US-AvaMultilingualNeural",
     speed="+0%",
     volume="+0%",
+    cache=True,
 )
 
 r = CLIDemoRecorder("out/demo.mp4", tts=tts)
@@ -199,6 +200,15 @@ prepared = r.synthesize_if_tts_enabled(
 r.explain(prepared)
 ```
 
+For several known cues, prepare them on the recorder instead of retyping async glue:
+
+```python
+intro, finish = r.prepare_cues(
+    ["The app is open.", "The result is now visible."],
+    async_tts=True,
+)
+```
+
 List available Edge voices:
 
 ```python
@@ -206,6 +216,15 @@ from demo_video_recorder import EdgeTTSBackend
 
 tts = EdgeTTSBackend(save_dir="out/voices")
 print("\n".join(tts.list_speakers()))
+```
+
+If Edge TTS repeatedly fails for a service or network reason, you can fall back
+to native OS speech on macOS or Windows:
+
+```python
+from demo_video_recorder import NativeTTSBackend
+
+tts = NativeTTSBackend(save_dir="out/demo.tts", cache=True)
 ```
 
 ## Defaults

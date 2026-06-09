@@ -14,9 +14,10 @@ from demo_video_recorder import (
     DEFAULTS,
     EdgeTTSBackend,
     FAST_SMOKE_TEST_DEFAULTS,
+    NativeTTSBackend,
     ProcessError,
+    SynthesizedExplanation,
 )
-from demo_video_recorder.tts import SynthesizedExplanation
 
 ROOT = Path(__file__).resolve().parents[1]
 GAME = Path(__file__).with_name("guessing_game.py")
@@ -71,12 +72,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--tts",
         action="store_true",
-        help="Use Edge TTS so explain() also produces narration audio.",
+        help="Use TTS so explain() also produces narration audio.",
+    )
+    parser.add_argument(
+        "--backend",
+        choices=("edge", "native"),
+        default="edge",
+        help="TTS backend to use when narration audio is enabled.",
     )
     parser.add_argument(
         "--tts-speaker",
-        default="en-US-AvaMultilingualNeural",
-        help="Edge TTS speaker/voice name.",
+        default=None,
+        help="TTS speaker/voice name. Defaults to the selected backend default.",
     )
     parser.add_argument(
         "--tts-speed",
@@ -94,6 +101,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Directory for intermediate per-line TTS clips.",
     )
     parser.add_argument(
+        "--cache-tts",
+        action="store_true",
+        dest="cache_tts",
+        default=True,
+        help="Reuse generated TTS clips between runs.",
+    )
+    parser.add_argument(
+        "--async",
+        action="store_true",
+        dest="async_tts",
+        help="Pre-synthesize known narration clips concurrently before recording.",
+    )
+    parser.add_argument(
         "--keep-tts-audio",
         action="store_true",
         help="Keep the generated per-line TTS clips and mixed narration track.",
@@ -101,7 +121,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--list-speakers",
         action="store_true",
-        help="Print available Edge TTS speakers and exit.",
+        help="Print available speakers for the selected TTS backend and exit.",
     )
     parser.add_argument(
         "--check-access",
@@ -133,6 +153,23 @@ def parse_window_size(value: str) -> tuple[int, int]:
     return (width, height)
 
 
+def build_tts_backend(args: argparse.Namespace, save_dir: Path):
+    if args.backend == "native":
+        return NativeTTSBackend(
+            save_dir=save_dir,
+            speaker=args.tts_speaker,
+            cache=args.cache_tts,
+        )
+
+    return EdgeTTSBackend(
+        save_dir=save_dir,
+        speaker=args.tts_speaker or "en-US-AvaMultilingualNeural",
+        speed=args.tts_speed,
+        volume=args.tts_volume,
+        cache=args.cache_tts,
+    )
+
+
 def open_game(
     recorder: CLIDemoRecorder, *, label: str | SynthesizedExplanation
 ) -> tuple[int, int]:
@@ -159,7 +196,7 @@ def play_by_feedback(recorder: CLIDemoRecorder, low: int, high: int) -> int:
         guess = (low + high) // 2
         attempts += 1
         if attempts == 1:
-            recorder.explain(f"I'm starting in the middle with {guess}. ")
+            recorder.explain(f"I'm starting in the middle with {guess}.")
         elif low == high:
             recorder.explain(
                 f"The hints have narrowed it down to {guess}, so this should be the one."
@@ -217,23 +254,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.tts_save_dir is not None
         else output_path.with_name(f"{output_path.stem}.tts")
     )
-    tts_backend = (
-        EdgeTTSBackend(
-            save_dir=tts_save_dir,
-            speaker=args.tts_speaker,
-            speed=args.tts_speed,
-            volume=args.tts_volume,
-        )
-        if tts_enabled
-        else None
-    )
+    tts_backend = build_tts_backend(args, tts_save_dir) if tts_enabled else None
     if args.list_speakers:
-        speaker_backend = tts_backend or EdgeTTSBackend(
-            save_dir=tts_save_dir,
-            speaker=args.tts_speaker,
-            speed=args.tts_speed,
-            volume=args.tts_volume,
-        )
+        speaker_backend = tts_backend or build_tts_backend(args, tts_save_dir)
         for speaker in speaker_backend.list_speakers():
             print(speaker)
         return 0
@@ -247,23 +270,23 @@ def main(argv: list[str] | None = None) -> int:
     )
     final_path: Path | None = None
 
-    intro_msg = recorder.synthesize_explanation_audio(
-        "I'm going to demonstrate playing the CLI guessing game. Let's see how it goes!"
-    )
-    first_run_msg = recorder.synthesize_explanation_audio(
-        "First run. I'll open the game and start guessing."
-    )
-    new_run_msg = recorder.synthesize_explanation_audio(
-        "Now I'm going to reopen the game. The goal is to prove a new run really comes with a random number."
-    )
-    subsequent_run_msg = recorder.synthesize_explanation_audio(
-        "Let's try the game again."
-    )
-    same_number_msg = recorder.synthesize_explanation_audio(
-        "Hmm, it rolled the same number again. That's unlikely but not impossible"
-    )
-    conclusion_msg = recorder.synthesize_explanation_audio(
-        "Thanks for watching this demo of the guessing game. It shows how the recorder can react to app output and use TTS narration to explain what's happening on screen."
+    (
+        intro_msg,
+        first_run_msg,
+        new_run_msg,
+        subsequent_run_msg,
+        same_number_msg,
+        conclusion_msg,
+    ) = recorder.prepare_cues(
+        [
+            "I'm going to demonstrate the CLI guessing game.",
+            "First run. I'll open the game and start guessing.",
+            "Now I'll reopen it to prove each run picks randomly.",
+            "Let's try the game again.",
+            "It rolled the same number again. Unlikely, but possible.",
+            "This demo reacts to real app output and narrates each step.",
+        ],
+        async_tts=args.async_tts,
     )
 
     try:
