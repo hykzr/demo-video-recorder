@@ -1,29 +1,50 @@
 # demo-video-recorder
 
-Scriptable demo video recording for Python agents and humans. The package separates reusable recording primitives from project-specific demo steps, so an agent can inspect a project, write a small `record_demo.py`, react to CLI output, and produce an MP4 with burned subtitles and optional narration audio.
+Scriptable demo video recording for Python agents and humans.
 
-The built-in backend uses the installed `ffmpeg` and `ffprobe` executables for screen capture, encoding, probing, subtitle burn-in, and narration audio muxing. Windows capture uses `gdigrab`; macOS capture uses `avfoundation`. Linux capture is not implemented yet.
+`demo-video-recorder` helps you write small Python scripts that drive a CLI, browser UI, or native app window and turn that interaction into an MP4. It handles screen or browser capture, subtitle timing, optional burned-in subtitles, and optional narration audio through TTS.
+
+It is especially useful when a coding agent needs to inspect a project, write a deterministic `record_demo.py`, react to app output, and produce a clean demo video without hand-recording the workflow.
 
 ## Install
 
 ```bash
-uv sync
+pip install demo-video-recorder
 ```
 
-External tools required for recording:
+With uv:
+
+```bash
+uv add demo-video-recorder
+```
+
+Recording depends on `ffmpeg` and `ffprobe` being available:
 
 ```bash
 ffmpeg -version
 ffprobe -version
 ```
 
-For Web UI demos, install the Playwright browser binaries once:
+For browser demos, install the Playwright browser binaries once in the environment where you installed the package:
 
 ```bash
-uv run playwright install chromium
+python -m playwright install chromium
 ```
 
-On macOS, high-quality burned subtitles require an `ffmpeg` build with the `subtitles` filter, which depends on `libass`. The default Homebrew `ffmpeg` formula does not include it. Install a libass-enabled build such as `ffmpeg-full`, then put it on `PATH`:
+Linux capture is not implemented yet. Windows capture uses `gdigrab`; macOS capture uses `avfoundation`. `WebUIRecorder` defaults to Playwright video capture, so headless browser demos do not need macOS Screen Recording permission unless you explicitly use `video_backend="ffmpeg"`.
+
+## macOS Notes
+
+On macOS, the first real screen recording (except playwright recording for webui apps) may require granting Screen Recording permission to Terminal, iTerm, your IDE, or whichever Python host runs the script. You can preflight this from Python:
+
+```python
+from demo_video_recorder import check_screen_recording_access
+
+result = check_screen_recording_access(prompt=True)
+print(result)
+```
+
+High-quality burned subtitles require an `ffmpeg` build with the `subtitles` filter, which depends on `libass`. If your active `ffmpeg` does not support it, install a libass-enabled build such as `ffmpeg-full` and put it on `PATH`:
 
 ```bash
 brew install ffmpeg-full
@@ -31,156 +52,55 @@ export PATH="/opt/homebrew/opt/ffmpeg-full/bin:$PATH"
 ffmpeg -hide_banner -filters | rg subtitles
 ```
 
-On macOS, the first real recording attempt may require granting Screen Recording permission to Terminal, iTerm, or the Python host (IDE, VS Code) you run the script from. You can preflight that prompt without recording by running `uv run python mac_request_access.py`. Add `--new-window` to check Terminal.app specifically.
-
-## Quick Start
-
-Record the bundled CLI example:
-
-```bash
-uv run python record.py --new-window
-```
-
-Add narration audio with Edge TTS:
-
-```bash
-uv run python record.py --new-window --tts
-```
-
-Print the available Edge TTS speakers:
-
-```bash
-uv run python record.py --list-speakers
-```
-
-Test only the narration path without opening a new terminal window or recording the screen:
-
-```bash
-uv run python record.py --audio-only
-```
-
-On macOS, `record.py` defaults to `--check-access`, which requests Screen Recording permission before capture starts and stops early if access is still denied.
-
-The example app lives in `examples/guessing_game.py`; the recording script is `examples/record_guessing_game.py`.
-The example intentionally uses a random secret number, so the recorder reads the app output and chooses guesses from the hints instead of replaying fixed inputs.
-
-Record the bundled Web UI example:
-
-```bash
-uv run python examples/record_webui_app.py
-```
-
-That script serves `examples/webui_app/` on localhost, opens it with Playwright, fills inputs, selects date/color/dropdown values, animates a slider, clicks a button, waits for the output, and writes `out/webui-demo.mp4`.
-
-## Defaults
-
-The built-in defaults mirror the original PowerShell script:
-
-```python
-from demo_video_recorder import DEFAULTS
-
-DEFAULTS.words_per_minute          # 170
-DEFAULTS.min_pause_seconds         # 2.0
-DEFAULTS.command_lead_seconds      # 0.0
-DEFAULTS.typed_character_delay     # 0.018
-DEFAULTS.capture_framerate         # 15
-DEFAULTS.video_scale_width         # 1280
-```
-
-Use `FAST_SMOKE_TEST_DEFAULTS` for quick local script checks, not polished final videos.
-
-## CLI Demo API
+## Quick Start: CLI Demo
 
 ```python
 from demo_video_recorder import CLIDemoRecorder
-from demo_video_recorder import EdgeTTSBackend
 
 
 def main():
-    tts = EdgeTTSBackend(
-        save_dir="out/demo.tts",
-        speaker="en-US-AvaMultilingualNeural",
-        speed="+0%",
-        volume="+0%",
-    )
-    r = CLIDemoRecorder("out/demo.mp4", words_per_minute=165, tts=tts)
+    r = CLIDemoRecorder("out/cli-demo.mp4")
     try:
         r.open_terminal(
-            title="Demo",
-            top=True,
-            window_size=(1200, 1200),
+            title="CLI Demo",
+            window_size=(1200, 900),
             start_recording=True,
             clear=True,
         )
-        prepared = r.synthesize_if_tts_enabled(
-            "The app responds to typed input while subtitles explain the action."
-        )
-        r.explain("Today we'll demo the main workflow.")
+        r.explain("We'll run the app and use its help command.")
         r.run(["python", "app.py"], interactive=True, command_label="python app.py")
         r.expect_output(">")
-        marker = r.mark_output()
         r.input("help")
-        r.expect_regex(r"Commands?:", since=marker)
-        r.explain(prepared)
+        r.expect_regex(r"Commands?:")
+        r.explain("The app prints the available commands, so the demo can keep going from real output.")
         r.input("quit")
         r.stop_app()
     finally:
         r.close()
         if r.is_recording:
             r.stop_recording()
+
+
+if __name__ == "__main__":
+    main()
 ```
 
-Useful methods:
+Useful CLI helpers:
 
-- `open_terminal(...)`: configures the terminal and can start recording immediately.
+- `open_terminal(...)`: configures the terminal and can start recording.
 - `clear()`: clears the current terminal with `clear` or `cls`.
 - `run(..., interactive=True)`: starts a CLI app and streams stdout/stderr to the recorded terminal.
-- `input("text")`: types into the active CLI app with a configurable typing delay.
-- `expect_output("text")`: waits until expected app output appears.
-- `expect_regex(r"...")`: waits for a regex match and returns the match object.
-- `mark_output()` / `output_since(marker)`: isolate output caused by one action.
-- `output_text("stdout")` and `output_text("stderr")`: inspect streams separately.
-- `explain("...")`: adds narration subtitles and, when TTS is configured, also generates a spoken narration clip.
-- `explain(prepared_explanation)`: reuses pre-generated narration text and audio without repeating the same string literal.
-- `synthesize_explanation_audio("...")`: prepares a `SynthesizedExplanation` ahead of time so `explain()` does not need to wait on synthesis during capture.
-- `synthesize_if_tts_enabled("...")`: returns a prepared explanation when TTS is configured, or the trimmed text when it is not. Prefer it over synthesize_explanation_audio as your smoke test won't end up doing the time costly synthesize all the time. use text directly if you do not use tts at all.
-- `EdgeTTSBackend.list_speakers()`: returns available Edge voices so you can choose one that fits the audience and tone.
-- `stop_recording()`: stops capture, trims subtitles to video duration, and writes the final MP4 with subtitles and narration audio.
-- `render_narration_audio()`: exports just the synthesized narration timeline, useful for `--audio-only` test runs.
+- `input("text")`: types into the active CLI app.
+- `expect_output("text")` and `expect_regex(r"...")`: wait for real app output.
+- `mark_output()` and `output_since(marker)`: isolate output caused by one action.
+- `explain("...")`: adds narration subtitles and optional spoken narration.
+- `stop_recording()`: finalizes the MP4.
 
-When `new_window=True` is used, the recorder re-runs the script in a dedicated terminal session. On Windows it opens a new console; on macOS it opens a new Terminal.app window and captures that window instead of the whole display when bounds are available. Worker stdout and stderr are also mirrored to `out/<name>.worker.log`. If the worker fails, the parent process prints the log tail so the recording script is easier to debug.
+When `new_window=True` is used, the recorder re-runs the script in a dedicated terminal session. On Windows it opens a new console. On macOS it opens a new Terminal.app window and captures that window when bounds are available. Worker stdout and stderr are mirrored to `out/<name>.worker.log`.
 
-Platform notes for terminal window control:
+## Quick Start: Web UI Demo
 
-- Windows supports `maximize`, `top=True`, and `window_size=(w, h)` for the recorder-managed console window.
-- macOS now applies `maximize` and `window_size=(w, h)` as a best-effort resize for Terminal.app and iTerm windows by scripting their window bounds.
-- macOS does not currently support persistent `top=True` / always-on-top behavior. The recorder can bring the terminal to the front, but Terminal.app and iTerm do not expose a portable AppleScript API for keeping a normal window above all other apps.
-
-When TTS is enabled, `explain()` uses the real generated audio length instead of the word-count estimate. If synthesis latency could show up in the capture, pre-generate the clip and pass it straight into `explain(prepared_explanation)`. Intermediate per-line clips are removed after the final output unless `keep_tts_audio=True`.
-
-## GUI or App Window API
-
-Currently it can capture the app window, more controls will be added later
-
-```python
-from demo_video_recorder import DemoVideoRecorder
-
-
-def main():
-    r = DemoVideoRecorder("out/notepad-demo.mp4")
-    try:
-        r.open_app(["notepad.exe"], title_hint="Untitled - Notepad", capture_window=True)
-        r.start_capture_window()
-        r.explain("Notepad is open and the window is being captured.")
-    finally:
-        r.close()
-        if r.is_recording:
-            r.stop_recording()
-```
-
-## Web UI Demo API
-
-`WebUIRecorder` is built for browser demos. It defaults to Playwright's own video recorder, which works for headless browser contexts and produces the raw MP4 that the existing subtitle and narration pipeline finalizes with ffmpeg.
+`WebUIRecorder` is built for browser demos. It defaults to Playwright's own page video recorder, which works in headless browser contexts and then passes the raw MP4 through the same subtitle and narration pipeline.
 
 ```python
 from demo_video_recorder import WebUIRecorder
@@ -193,57 +113,122 @@ def main():
         r.open_web("/")
         r.explain("The local web app is open.")
         r.find_input(label="Email address").fill("ada@example.com")
-        r.find_input(label="Date of birth").set_date("1991-08-14")
-        r.find_select(label="Salary tier").select_option(label="$100,000 to $150,000")
-        r.find_input("input", type="range").set_range(8)
-        r.find("button", text="Review intake details").click()
-        r.find("aside", text="ada@example.com").highlight()
+        r.find_select(label="Plan").select_option(label="Pro")
+        r.find(role="button", name="Continue").click()
+        r.find("main", text="Welcome").highlight()
+        r.explain("The workflow is complete and the confirmation is visible.")
     finally:
         r.close()
         if r.is_recording:
             r.stop_recording()
+
+
+if __name__ == "__main__":
+    main()
 ```
 
-Useful methods:
+Useful Web UI helpers:
 
-- `serve(path, port=8000)`: serves a static folder over `http://127.0.0.1:<port>`.
-- `open_web(url=None, ...)`: opens a URL. Bare domains such as `example.com` become `https://example.com`; relative paths such as `/demo` use the served folder.
-- `find(...)`: bs4-style element lookup that raises `WebElementNotFoundError` when nothing visible is found.
-- `find_optional(...)`: same lookup, returning `None` when nothing is found.
-- `find_all(...)`: returns all matched elements.
-- `find_input(...)` / `find_all_input(...)`: restrict lookup to `input` and `textarea` controls and return `WebInputElement`.
-- `find_select(...)` / `find_all_select(...)`: restrict lookup to `select` controls and return `WebSelectElement`.
-- Element methods: `highlight()`, `click()`, `double_click()`, `hover()`, `wait()`, `text()`, and `attribute()`. Highlights smooth-scroll the element into view first.
-- Input/control methods: `fill()`, `type()`, `clear()`, `set_value()`, `set_range()`, `set_date()`, `set_color()`, `set_files()`, `press()`, `check()`, `uncheck()`, and `select_option()`.
-- Visual control methods show recorder-friendly UI before committing values: select dropdown options, date calendars, color swatches, animated range movement, and whole-label highlights for radio/checkbox controls.
-- Form methods: `submit()`.
+- `serve(path, port=8000)`: serves a static folder over localhost.
+- `open_web(url=None)`: opens a URL. Bare domains become `https://...`; relative paths use the served folder.
+- `find(...)`: bs4-style visible element lookup.
+- `find_optional(...)`: returns `None` instead of raising when an element is absent.
+- `find_input(...)`: finds `input` and `textarea` controls.
+- `find_select(...)`: finds `select` controls.
+- Element methods include `highlight()`, `click()`, `double_click()`, `hover()`, `wait()`, `text()`, and `attribute()`.
+- Input methods include `fill()`, `type()`, `clear()`, `set_range()`, `set_date()`, `set_color()`, `set_files()`, `press()`, `check()`, `uncheck()`, and `select_option()`.
 
-`find()` accepts `name` and attrs like Beautiful Soup, plus Playwright-friendly selectors:
+`find()` accepts Beautiful Soup style names and attrs plus Playwright-friendly selectors:
 
 ```python
 r.find("button", text="Save")
 r.find("input", {"name": "email"})
-r.find("input", _class="field-control", text="Email")
+r.find("input", _class="field-control")
 r.find(selector="[data-testid='submit']")
 r.find(role="button", name="Continue")
 r.find(label="Email address").fill("ada@example.com")
 ```
 
-If you need to record an actual visible browser window instead of Playwright's page video, pass `video_backend="ffmpeg"` and run headed with `headless=False`.
+Prefer robust selectors in this order: role and accessible name, label or placeholder, test id, then CSS selector.
 
-## Agent Usage
+## Quick Start: Native App Window
 
-See `AGENT.md` for instructions aimed at coding agents. The intended flow is:
+```python
+from demo_video_recorder import DemoVideoRecorder
 
-1. Inspect the target project.
-2. Write a small deterministic recording script.
-3. Use `explain()` around visible actions.
-4. Run and fix the script until `out/<name>.mp4` is created.
 
-## Publish Notes
+def main():
+    r = DemoVideoRecorder("out/app-demo.mp4")
+    try:
+        r.open_app(["notepad.exe"], title_hint="Untitled - Notepad", capture_window=True)
+        r.start_capture_window()
+        r.explain("The app window is open and being captured.")
+    finally:
+        r.close()
+        if r.is_recording:
+            r.stop_recording()
 
-Build locally with:
+
+if __name__ == "__main__":
+    main()
+```
+
+## Narration Audio
+
+Add `EdgeTTSBackend` when you want spoken narration in addition to subtitles:
+
+```python
+from demo_video_recorder import CLIDemoRecorder, EdgeTTSBackend
+
+tts = EdgeTTSBackend(
+    save_dir="out/demo.tts",
+    speaker="en-US-AvaMultilingualNeural",
+    speed="+0%",
+    volume="+0%",
+)
+
+r = CLIDemoRecorder("out/demo.mp4", tts=tts)
+```
+
+When TTS is enabled, `explain()` uses the generated audio duration instead of estimating from word count. If synthesis latency would show up as dead air in the capture, pre-generate longer narration:
+
+```python
+prepared = r.synthesize_if_tts_enabled(
+    "This narration is prepared before the visible interaction begins."
+)
+r.explain(prepared)
+```
+
+List available Edge voices:
+
+```python
+from demo_video_recorder import EdgeTTSBackend
+
+tts = EdgeTTSBackend(save_dir="out/voices")
+print("\n".join(tts.list_speakers()))
+```
+
+## Defaults
+
+```python
+from demo_video_recorder import DEFAULTS, FAST_SMOKE_TEST_DEFAULTS
+
+DEFAULTS.words_per_minute          # 170
+DEFAULTS.min_pause_seconds         # 2.0
+DEFAULTS.command_lead_seconds      # 0.0
+DEFAULTS.typed_character_delay     # 0.018
+DEFAULTS.capture_framerate         # 15
+DEFAULTS.video_scale_width         # 1280
+```
+
+Use `FAST_SMOKE_TEST_DEFAULTS` for quick local script checks, not polished final videos.
+
+## FOR AI AGENT: PLEASE READ
+
+This package ships a complete guide for coding agents. Before writing a recording script, read it from the installed package:
 
 ```bash
-uv build
+python -c "import importlib.resources as r; print((r.files('demo_video_recorder') / 'AGENT.md').read_text())"
 ```
+
+The guide covers environment checks, macOS permissions, subtitle support, CLI and Web UI recording patterns, output-aware interactions, TTS pre-synthesis, and final video verification.
