@@ -152,6 +152,10 @@
       padding: 0;
     }
 
+    input[type="color"] {
+      padding: 4px;
+    }
+
     .range-row {
       display: grid;
       grid-template-columns: 1fr 44px;
@@ -268,6 +272,14 @@
           <input id="postal-code" class="field-control address-input" name="postal_code" placeholder="94107"
             autocomplete="postal-code" />
         </div>
+        <div class="field">
+          <label for="date-of-birth">Date of birth</label>
+          <input id="date-of-birth" class="field-control" name="date_of_birth" type="date" />
+        </div>
+        <div class="field">
+          <label for="preferred-color">Preferred color</label>
+          <input id="preferred-color" class="field-control" name="preferred_color" type="color" value="#1f6f8b" />
+        </div>
         <fieldset class="wide">
           <legend>Gender</legend>
           <div class="choices">
@@ -332,6 +344,8 @@
         email: data.get("email") || "Not provided",
         phone: data.get("phone") || "Not provided",
         address: `${data.get("street_address") || ""}, ${data.get("city") || ""} ${data.get("postal_code") || ""}`.replace(/^,\s*/, "").trim() || "Not provided",
+        birthday: data.get("date_of_birth") || "Not provided",
+        color: data.get("preferred_color") || "Not provided",
         gender: data.get("gender") || "Not provided",
         salary: document.querySelector("#salary-tier option:checked").textContent,
         travel: `${data.get("travel_readiness")} out of 10`,

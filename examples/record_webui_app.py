@@ -120,6 +120,9 @@ def main(argv: list[str] | None = None) -> int:
     contact_details = recorder.synthesize_if_tts_enabled(
         "I'll start with the contact details: name, email, phone, and address."
     )
+    profile_details = recorder.synthesize_if_tts_enabled(
+        "Then I'll choose a date of birth and preferred color so the native-style pickers are visible in the recording."
+    )
     preferences = recorder.synthesize_if_tts_enabled(
         "Next come the preference fields: gender, a salary tier, and a travel-readiness slider."
     )
@@ -147,12 +150,16 @@ def main(argv: list[str] | None = None) -> int:
         recorder.find_input(label="City", _class="address-input").fill("San Francisco")
         recorder.find_input(label="Postal code", _class="address-input").fill("94105")
 
+        recorder.explain(profile_details)
+        recorder.find_input(label="Date of birth", type="date").set_date("1991-08-14")
+        recorder.find_input(label="Preferred color", type="color").set_color("#146348")
+
         recorder.explain(preferences)
         recorder.find_input("input", {"name": "gender", "value": "Female"}).check()
         recorder.find_select(label="Salary tier").select_option(
             label="$100,000 to $150,000"
         )
-        recorder.find_input("input", type="range").set_value(8)
+        recorder.find_input("input", type="range").set_range(8)
         recorder.find("output", id="travel-output", text="8").highlight()
 
         recorder.explain(finish)
@@ -162,6 +169,7 @@ def main(argv: list[str] | None = None) -> int:
         recorder.find_input("input", id="terms").check()
         recorder.find("button", text="Review intake details").click()
         recorder.find("aside", text="Maya Chen").highlight()
+        recorder.find("aside", text="1991-08-14")
         recorder.find("aside", text="Accepted")
         recorder.explain(conclusion)
     finally:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 import re
 from urllib.request import urlopen
 
@@ -27,6 +28,11 @@ class FakeLocator:
         self.text_filter: str | re.Pattern[str] | None = None
         self.wait_state: str | None = None
         self.wait_timeout: float | None = None
+        self.evaluate_calls: list[tuple[str, object | None]] = []
+        self.checked = False
+        self.unchecked = False
+        self.selected_options: dict[str, object] | None = None
+        self.input_files: str | list[str] | None = None
 
     @property
     def first(self) -> "FakeLocator":
@@ -39,6 +45,7 @@ class FakeLocator:
         self.wait_timeout = timeout
 
     def evaluate(self, script: str, *args: object) -> str | None:
+        self.evaluate_calls.append((script, args[0] if args else None))
         if "tagName" in script:
             return self.tag
         return None
@@ -60,6 +67,42 @@ class FakeLocator:
         if self.items is None:
             return self
         return self.items[index]
+
+    def clear(self, *, timeout: float) -> None:
+        del timeout
+
+    def type(self, text: str, *, delay: float | None, timeout: float) -> None:
+        del text, delay, timeout
+
+    def fill(self, value: str, *, timeout: float) -> None:
+        del value, timeout
+
+    def check(self, *, timeout: float) -> None:
+        del timeout
+        self.checked = True
+
+    def uncheck(self, *, timeout: float) -> None:
+        del timeout
+        self.unchecked = True
+
+    def select_option(
+        self,
+        *,
+        value: object = None,
+        label: object = None,
+        index: object = None,
+        timeout: float,
+    ) -> None:
+        self.selected_options = {
+            "value": value,
+            "label": label,
+            "index": index,
+            "timeout": timeout,
+        }
+
+    def set_input_files(self, files: str | list[str], *, timeout: float) -> None:
+        del timeout
+        self.input_files = files
 
 
 class FakeScope:
@@ -208,6 +251,71 @@ def test_find_all_input_and_find_all_select_return_typed_lists(tmp_path) -> None
     assert all(not isinstance(item, WebSelectElement) for item in inputs)
     assert len(selects) == 1
     assert isinstance(selects[0], WebSelectElement)
+
+
+def test_check_and_uncheck_highlight_the_containing_field(tmp_path) -> None:
+    recorder = WebUIRecorder(tmp_path / "demo.mp4")
+    locator = FakeLocator("input[type=checkbox]", tag="input")
+    element = WebInputElement(recorder, locator)
+
+    element.check()
+    element.uncheck()
+
+    highlight_args = [args for script, args in locator.evaluate_calls if "scrollIntoView" in script]
+    assert highlight_args == [
+        {"duration": 700, "scope": "field"},
+        {"duration": 700, "scope": "field"},
+    ]
+    assert locator.checked is True
+    assert locator.unchecked is True
+
+
+def test_set_value_animates_range_inputs(tmp_path) -> None:
+    recorder = WebUIRecorder(tmp_path / "demo.mp4")
+    locator = FakeLocator("input[type=range]", tag="input")
+    element = WebInputElement(recorder, locator)
+
+    element.set_range(8, duration_ms=425)
+
+    assert locator.evaluate_calls[-1][1] == {"value": 8, "duration": 425}
+
+
+def test_date_color_and_file_input_actions_have_visible_steps(tmp_path) -> None:
+    recorder = WebUIRecorder(tmp_path / "demo.mp4")
+    locator = FakeLocator("input[type=date]", tag="input")
+    element = WebInputElement(recorder, locator)
+
+    element.set_date("1991-08-14", preview_ms=321)
+    element.set_color("#146348", preview_ms=654)
+    element.set_files([Path("resume.pdf"), "photo.png"])
+
+    args = [call_args for _script, call_args in locator.evaluate_calls]
+    assert {"value": "1991-08-14", "preview": 321} in args
+    assert {"value": "#146348", "preview": 654} in args
+    assert {"value": "1991-08-14", "duration": 0} in args
+    assert {"value": "#146348", "duration": 0} in args
+    assert locator.input_files == ["resume.pdf", "photo.png"]
+
+
+def test_select_option_shows_options_before_selecting(tmp_path) -> None:
+    recorder = WebUIRecorder(tmp_path / "demo.mp4")
+    locator = FakeLocator("select", tag="select")
+    element = WebSelectElement(recorder, locator)
+
+    element.select_option(label="$100,000 to $150,000")
+
+    assert locator.evaluate_calls[-1][1] == {
+        "value": None,
+        "label": "$100,000 to $150,000",
+        "index": None,
+        "preview": 900,
+    }
+    assert locator.selected_options == {
+        "value": None,
+        "label": "$100,000 to $150,000",
+        "index": None,
+        "timeout": 10000.0,
+    }
 
 
 def test_webui_recorder_uses_playwright_video_backend_by_default(tmp_path) -> None:

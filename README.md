@@ -70,7 +70,7 @@ Record the bundled Web UI example:
 uv run python examples/record_webui_app.py
 ```
 
-That script serves `examples/webui_app/` on localhost, opens it with Playwright, fills an input, clicks a button, waits for the output, and writes `out/webui-demo.mp4`.
+That script serves `examples/webui_app/` on localhost, opens it with Playwright, fills inputs, selects date/color/dropdown values, animates a slider, clicks a button, waits for the output, and writes `out/webui-demo.mp4`.
 
 ## Defaults
 
@@ -193,7 +193,9 @@ def main():
         r.open_web("/")
         r.explain("The local web app is open.")
         r.find_input(label="Email address").fill("ada@example.com")
+        r.find_input(label="Date of birth").set_date("1991-08-14")
         r.find_select(label="Salary tier").select_option(label="$100,000 to $150,000")
+        r.find_input("input", type="range").set_range(8)
         r.find("button", text="Review intake details").click()
         r.find("aside", text="ada@example.com").highlight()
     finally:
@@ -211,8 +213,9 @@ Useful methods:
 - `find_all(...)`: returns all matched elements.
 - `find_input(...)` / `find_all_input(...)`: restrict lookup to `input` and `textarea` controls and return `WebInputElement`.
 - `find_select(...)` / `find_all_select(...)`: restrict lookup to `select` controls and return `WebSelectElement`.
-- Element methods: `highlight()`, `click()`, `double_click()`, `hover()`, `wait()`, `text()`, and `attribute()`.
-- Input/control methods: `fill()`, `type()`, `clear()`, `set_value()`, `press()`, `check()`, `uncheck()`, and `select_option()`.
+- Element methods: `highlight()`, `click()`, `double_click()`, `hover()`, `wait()`, `text()`, and `attribute()`. Highlights smooth-scroll the element into view first.
+- Input/control methods: `fill()`, `type()`, `clear()`, `set_value()`, `set_range()`, `set_date()`, `set_color()`, `set_files()`, `press()`, `check()`, `uncheck()`, and `select_option()`.
+- Visual control methods show recorder-friendly UI before committing values: select dropdown options, date calendars, color swatches, animated range movement, and whole-label highlights for radio/checkbox controls.
 - Form methods: `submit()`.
 
 `find()` accepts `name` and attrs like Beautiful Soup, plus Playwright-friendly selectors:

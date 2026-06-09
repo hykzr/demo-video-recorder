@@ -201,8 +201,9 @@ Useful helpers:
 - `find_all(...)` returns all matched elements.
 - `find_input(...)` and `find_all_input(...)` restrict lookup to `input` and `textarea` controls.
 - `find_select(...)` and `find_all_select(...)` restrict lookup to `select` controls.
-- Element actions include `highlight()`, `click()`, `double_click()`, `hover()`, `wait()`, `text()`, and `attribute()`.
-- Input/control actions include `fill()`, `type()`, `clear()`, `set_value()`, `press()`, `check()`, `uncheck()`, and `select_option()`.
+- Element actions include `highlight()`, `click()`, `double_click()`, `hover()`, `wait()`, `text()`, and `attribute()`. Highlights smooth-scroll the target into view.
+- Input/control actions include `fill()`, `type()`, `clear()`, `set_value()`, `set_range()`, `set_date()`, `set_color()`, `set_files()`, `press()`, `check()`, `uncheck()`, and `select_option()`.
+- Prefer the specific visual actions for native controls: `select_option()` shows options, `set_date()` shows a calendar, `set_color()` shows color swatches, `set_range()` animates movement, and radio/checkbox checks highlight the containing field.
 - Form actions include `submit()`.
 
 Prefer robust selectors in this order: role and accessible name, label/placeholder/test id, then CSS selector. Use `find_optional()` when a conditional banner, modal, or toast may or may not appear.
@@ -311,7 +312,7 @@ class WebUIRecorder(
 class WebElement
 ```
 
-- `highlight(*, duration_ms=700) -> WebElement`
+- `highlight(*, duration_ms=700, scope="element") -> WebElement`
 - `wait(*, state="visible", timeout_seconds=10.0) -> WebElement`
 - `click(*, button="left", click_count=1, timeout_seconds=10.0, highlight=True) -> WebElement`
 - `double_click(*, timeout_seconds=10.0, highlight=True) -> WebElement`
@@ -327,7 +328,11 @@ class WebInputElement(WebElement)
 - `fill(value, *, timeout_seconds=10.0, highlight=True) -> WebInputElement`
 - `type(text, *, delay_ms=None, timeout_seconds=10.0, highlight=True) -> WebInputElement`
 - `clear(*, timeout_seconds=10.0, highlight=True) -> WebInputElement`
-- `set_value(value, *, highlight=True) -> WebInputElement`
+- `set_value(value, *, highlight=True, duration_ms=800) -> WebInputElement`
+- `set_range(value, *, duration_ms=800, highlight=True) -> WebInputElement`
+- `set_date(value, *, preview_ms=900, highlight=True) -> WebInputElement`
+- `set_color(value, *, preview_ms=900, highlight=True) -> WebInputElement`
+- `set_files(files, *, timeout_seconds=10.0, highlight=True) -> WebInputElement`
 - `press(key, *, timeout_seconds=10.0) -> WebInputElement`
 - `check(*, timeout_seconds=10.0, highlight=True) -> WebInputElement`
 - `uncheck(*, timeout_seconds=10.0, highlight=True) -> WebInputElement`

@@ -40,24 +40,43 @@ class WebElement:
         self.recorder = recorder
         self.locator = locator.first
 
-    def highlight(self, *, duration_ms: int = 700) -> "WebElement":
-        self.locator.scroll_into_view_if_needed()
+    def highlight(
+        self,
+        *,
+        duration_ms: int = 700,
+        scope: Literal["element", "field"] = "element",
+    ) -> "WebElement":
         self.locator.evaluate(
             """
-            async (element, duration) => {
-                const previousOutline = element.style.outline;
-                const previousOffset = element.style.outlineOffset;
-                const previousTransition = element.style.transition;
-                element.style.transition = 'outline 120ms ease';
-                element.style.outline = '4px solid #ffbf00';
-                element.style.outlineOffset = '3px';
-                await new Promise(resolve => setTimeout(resolve, duration));
-                element.style.outline = previousOutline;
-                element.style.outlineOffset = previousOffset;
-                element.style.transition = previousTransition;
+            async (element, args) => {
+                const target = args.scope === 'field'
+                    ? element.closest('label, .field, fieldset, [role="group"]') || element
+                    : element;
+                target.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'center',
+                    inline: 'center',
+                });
+                await new Promise(resolve => setTimeout(resolve, 300));
+
+                const previousOutline = target.style.outline;
+                const previousOffset = target.style.outlineOffset;
+                const previousTransition = target.style.transition;
+                const previousRadius = target.style.borderRadius;
+                target.style.transition = 'outline 120ms ease';
+                target.style.outline = '4px solid #ffbf00';
+                target.style.outlineOffset = '3px';
+                if (!target.style.borderRadius) {
+                    target.style.borderRadius = '6px';
+                }
+                await new Promise(resolve => setTimeout(resolve, args.duration));
+                target.style.outline = previousOutline;
+                target.style.outlineOffset = previousOffset;
+                target.style.transition = previousTransition;
+                target.style.borderRadius = previousRadius;
             }
             """,
-            duration_ms,
+            {"duration": duration_ms, "scope": scope},
         )
         return self
 
@@ -323,25 +342,229 @@ class WebInputElement(WebElement):
         value: str | int | float,
         *,
         highlight: bool = True,
+        duration_ms: int = 800,
     ) -> "WebInputElement":
         """Set a control value and emit input/change events.
 
         This is useful for controls such as ``input[type=range]`` that do not
-        behave like text fields but still expose a value.
+        behave like text fields but still expose a value. Range inputs are
+        animated so the recorded video shows the thumb moving.
         """
 
         if highlight:
             self.highlight()
         self.locator.evaluate(
             """
-            (element, value) => {
-                element.value = String(value);
-                element.dispatchEvent(new Event('input', { bubbles: true }));
-                element.dispatchEvent(new Event('change', { bubbles: true }));
+            async (element, args) => {
+                const dispatch = name => {
+                    element.dispatchEvent(new Event(name, { bubbles: true }));
+                };
+                const finalValue = String(args.value);
+
+                if (
+                    element instanceof HTMLInputElement
+                    && element.type === 'range'
+                    && args.duration > 0
+                ) {
+                    const start = Number(element.value || element.min || 0);
+                    const end = Number(finalValue);
+                    const duration = Number(args.duration);
+                    const startedAt = performance.now();
+
+                    await new Promise(resolve => {
+                        const step = now => {
+                            const progress = Math.min((now - startedAt) / duration, 1);
+                            const eased = 1 - Math.pow(1 - progress, 3);
+                            const next = start + ((end - start) * eased);
+                            element.value = String(next);
+                            dispatch('input');
+                            if (progress < 1) {
+                                requestAnimationFrame(step);
+                            } else {
+                                element.value = finalValue;
+                                dispatch('input');
+                                resolve();
+                            }
+                        };
+                        requestAnimationFrame(step);
+                    });
+                    dispatch('change');
+                    return;
+                }
+
+                element.value = finalValue;
+                dispatch('input');
+                dispatch('change');
             }
             """,
-            value,
+            {"value": value, "duration": duration_ms},
         )
+        return self
+
+    def set_range(
+        self,
+        value: str | int | float,
+        *,
+        duration_ms: int = 800,
+        highlight: bool = True,
+    ) -> "WebInputElement":
+        """Set an ``input[type=range]`` value with visible thumb movement."""
+
+        return self.set_value(value, highlight=highlight, duration_ms=duration_ms)
+
+    def set_date(
+        self,
+        value: str,
+        *,
+        preview_ms: int = 900,
+        highlight: bool = True,
+    ) -> "WebInputElement":
+        """Set a date input while briefly showing a recorder-friendly calendar."""
+
+        if highlight:
+            self.highlight()
+        self.locator.evaluate(
+            """
+            async (element, args) => {
+                const date = new Date(`${args.value}T12:00:00`);
+                if (Number.isNaN(date.getTime())) {
+                    return;
+                }
+
+                const overlay = document.createElement('div');
+                overlay.setAttribute('data-demo-recorder-picker', 'date');
+                const rect = element.getBoundingClientRect();
+                Object.assign(overlay.style, {
+                    position: 'fixed',
+                    left: `${Math.min(rect.left, window.innerWidth - 286)}px`,
+                    top: `${Math.min(rect.bottom + 8, window.innerHeight - 294)}px`,
+                    zIndex: '2147483647',
+                    width: '278px',
+                    padding: '14px',
+                    border: '1px solid #9fb2c4',
+                    borderRadius: '8px',
+                    background: '#ffffff',
+                    color: '#17212c',
+                    boxShadow: '0 18px 48px rgba(30, 47, 64, 0.24)',
+                    font: '13px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+                });
+
+                const month = date.toLocaleString(undefined, {
+                    month: 'long',
+                    year: 'numeric',
+                });
+                const first = new Date(date.getFullYear(), date.getMonth(), 1);
+                const days = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+                const selectedDay = date.getDate();
+                const weekdays = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+                const cells = [];
+                for (let i = 0; i < first.getDay(); i += 1) {
+                    cells.push('<span></span>');
+                }
+                for (let day = 1; day <= days; day += 1) {
+                    const selected = day === selectedDay;
+                    cells.push(`<span style="
+                        display:grid;place-items:center;height:30px;border-radius:6px;
+                        ${selected ? 'background:#1f6f8b;color:white;font-weight:760;' : ''}
+                    ">${day}</span>`);
+                }
+
+                overlay.innerHTML = `
+                    <div style="font-weight:760;margin-bottom:10px;">${month}</div>
+                    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;color:#536270;margin-bottom:5px;text-align:center;font-weight:700;">
+                        ${weekdays.map(day => `<span>${day}</span>`).join('')}
+                    </div>
+                    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;">
+                        ${cells.join('')}
+                    </div>
+                `;
+                document.body.appendChild(overlay);
+                await new Promise(resolve => setTimeout(resolve, args.preview));
+                overlay.remove();
+            }
+            """,
+            {"value": value, "preview": preview_ms},
+        )
+        self.set_value(value, highlight=False, duration_ms=0)
+        return self
+
+    def set_color(
+        self,
+        value: str,
+        *,
+        preview_ms: int = 900,
+        highlight: bool = True,
+    ) -> "WebInputElement":
+        """Set a color input while briefly showing a color chooser preview."""
+
+        if highlight:
+            self.highlight()
+        self.locator.evaluate(
+            """
+            async (element, args) => {
+                const targetColor = String(args.value);
+                const rect = element.getBoundingClientRect();
+                const swatches = [
+                    '#1f6f8b', '#146348', '#f7c767', '#c94f4f',
+                    '#725ac1', '#17212c', '#ffffff', targetColor,
+                ];
+                const overlay = document.createElement('div');
+                overlay.setAttribute('data-demo-recorder-picker', 'color');
+                Object.assign(overlay.style, {
+                    position: 'fixed',
+                    left: `${Math.min(rect.left, window.innerWidth - 238)}px`,
+                    top: `${Math.min(rect.bottom + 8, window.innerHeight - 176)}px`,
+                    zIndex: '2147483647',
+                    width: '230px',
+                    padding: '14px',
+                    border: '1px solid #9fb2c4',
+                    borderRadius: '8px',
+                    background: '#ffffff',
+                    color: '#17212c',
+                    boxShadow: '0 18px 48px rgba(30, 47, 64, 0.24)',
+                    font: '13px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+                });
+                overlay.innerHTML = `
+                    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+                        <span style="display:block;width:34px;height:34px;border-radius:7px;border:1px solid #9fb2c4;background:${targetColor};"></span>
+                        <strong>${targetColor}</strong>
+                    </div>
+                    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">
+                        ${swatches.map(color => `
+                            <span style="
+                                display:block;height:32px;border-radius:7px;background:${color};
+                                border:${color.toLowerCase() === targetColor.toLowerCase() ? '3px solid #1f6f8b' : '1px solid #9fb2c4'};
+                            "></span>
+                        `).join('')}
+                    </div>
+                `;
+                document.body.appendChild(overlay);
+                await new Promise(resolve => setTimeout(resolve, args.preview));
+                overlay.remove();
+            }
+            """,
+            {"value": value, "preview": preview_ms},
+        )
+        self.set_value(value, highlight=False, duration_ms=0)
+        return self
+
+    def set_files(
+        self,
+        files: str | Path | Sequence[str | Path],
+        *,
+        timeout_seconds: float = 10.0,
+        highlight: bool = True,
+    ) -> "WebInputElement":
+        """Attach one or more files to an ``input[type=file]`` control."""
+
+        if highlight:
+            self.highlight()
+        resolved: str | list[str]
+        if isinstance(files, (str, Path)):
+            resolved = str(files)
+        else:
+            resolved = [str(path) for path in files]
+        self.locator.set_input_files(resolved, timeout=timeout_seconds * 1000)
         return self
 
     def press(self, key: str, *, timeout_seconds: float = 10.0) -> "WebInputElement":
@@ -355,7 +578,7 @@ class WebInputElement(WebElement):
         highlight: bool = True,
     ) -> "WebInputElement":
         if highlight:
-            self.highlight()
+            self.highlight(scope="field")
         self.locator.check(timeout=timeout_seconds * 1000)
         return self
 
@@ -366,7 +589,7 @@ class WebInputElement(WebElement):
         highlight: bool = True,
     ) -> "WebInputElement":
         if highlight:
-            self.highlight()
+            self.highlight(scope="field")
         self.locator.uncheck(timeout=timeout_seconds * 1000)
         return self
 
@@ -404,6 +627,7 @@ class WebSelectElement(WebInputElement):
     ) -> "WebSelectElement":
         if highlight:
             self.highlight()
+        self._show_options(value=value, label=label, index=index)
         self.locator.select_option(
             value=value,
             label=label,
@@ -411,6 +635,75 @@ class WebSelectElement(WebInputElement):
             timeout=timeout_seconds * 1000,
         )
         return self
+
+    def _show_options(
+        self,
+        *,
+        value: str | Sequence[str] | None,
+        label: str | Sequence[str] | None,
+        index: int | Sequence[int] | None,
+        preview_ms: int = 900,
+    ) -> None:
+        self.locator.evaluate(
+            """
+            async (element, args) => {
+                const first = candidate => Array.isArray(candidate) ? candidate[0] : candidate;
+                const target = {
+                    value: first(args.value),
+                    label: first(args.label),
+                    index: first(args.index),
+                };
+                const options = Array.from(element.options);
+                const selectedIndex = options.findIndex((option, optionIndex) => {
+                    if (target.index !== null && target.index !== undefined) {
+                        return optionIndex === Number(target.index);
+                    }
+                    if (target.label !== null && target.label !== undefined) {
+                        return option.label === String(target.label) || option.text === String(target.label);
+                    }
+                    if (target.value !== null && target.value !== undefined) {
+                        return option.value === String(target.value);
+                    }
+                    return option.selected;
+                });
+                const rect = element.getBoundingClientRect();
+                const overlay = document.createElement('div');
+                overlay.setAttribute('data-demo-recorder-picker', 'select');
+                Object.assign(overlay.style, {
+                    position: 'fixed',
+                    left: `${rect.left}px`,
+                    top: `${Math.min(rect.bottom + 6, window.innerHeight - 220)}px`,
+                    zIndex: '2147483647',
+                    minWidth: `${Math.max(rect.width, 220)}px`,
+                    maxWidth: '360px',
+                    maxHeight: '212px',
+                    overflow: 'hidden',
+                    border: '1px solid #9fb2c4',
+                    borderRadius: '8px',
+                    background: '#ffffff',
+                    color: '#17212c',
+                    boxShadow: '0 18px 48px rgba(30, 47, 64, 0.24)',
+                    font: '14px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+                });
+                overlay.innerHTML = options.map((option, optionIndex) => `
+                    <div style="
+                        padding:9px 12px;
+                        border-bottom:${optionIndex === options.length - 1 ? '0' : '1px solid #dbe4ec'};
+                        ${optionIndex === selectedIndex ? 'background:#1f6f8b;color:white;font-weight:760;' : ''}
+                    ">${option.text}</div>
+                `).join('');
+                document.body.appendChild(overlay);
+                await new Promise(resolve => setTimeout(resolve, args.preview));
+                overlay.remove();
+            }
+            """,
+            {
+                "value": value,
+                "label": label,
+                "index": index,
+                "preview": preview_ms,
+            },
+        )
 
 
 class WebFormElement(WebElement):
