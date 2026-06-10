@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from difflib import SequenceMatcher
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import re
 import threading
+import time
 from typing import Literal, Mapping, Sequence
 from urllib.parse import urlparse
 
@@ -337,6 +339,339 @@ class WebInputElement(WebElement):
         self.locator.clear(timeout=timeout_seconds * 1000)
         return self
 
+    def edit_text(
+        self,
+        value: str,
+        *,
+        remove_chars: int | None = None,
+        backspace_delay_ms: float | None = None,
+        type_delay_ms: float | None = None,
+        timeout_seconds: float = 10.0,
+        highlight: bool = True,
+    ) -> "WebInputElement":
+        """Edit text by applying the smallest visible keyboard changes."""
+
+        if highlight:
+            self.highlight()
+        self.locator.click(timeout=timeout_seconds * 1000)
+
+        if remove_chars is not None:
+            return self._replace_from_end(
+                value,
+                remove_chars=remove_chars,
+                backspace_delay_ms=backspace_delay_ms,
+                type_delay_ms=type_delay_ms,
+                timeout_seconds=timeout_seconds,
+            )
+
+        current_value = str(
+            self.locator.evaluate("element => String(element.value ?? '')") or ""
+        )
+        edits = self._diff_text_edits(current_value, value)
+        if not edits:
+            return self
+
+        resolved_backspace_delay = (
+            self.recorder.typed_character_delay * 1000
+            if backspace_delay_ms is None
+            else backspace_delay_ms
+        )
+        resolved_type_delay = (
+            self.recorder.typed_character_delay * 1000
+            if type_delay_ms is None
+            else type_delay_ms
+        )
+
+        running_length = len(current_value)
+        for start, end, replacement in reversed(edits):
+            restore_type = self._move_caret(
+                end,
+                current_length=running_length,
+                timeout_seconds=timeout_seconds,
+            )
+            try:
+                for _ in range(end - start):
+                    self._press_edit_key("Backspace", timeout_seconds=timeout_seconds)
+                    if resolved_backspace_delay > 0:
+                        time.sleep(resolved_backspace_delay / 1000)
+                if replacement:
+                    self._type_edit_text(
+                        replacement,
+                        delay=resolved_type_delay,
+                        timeout_seconds=timeout_seconds,
+                    )
+            finally:
+                self._restore_input_type(restore_type)
+            running_length += len(replacement) - (end - start)
+        return self
+
+    def _replace_from_end(
+        self,
+        value: str,
+        *,
+        remove_chars: int,
+        backspace_delay_ms: float | None,
+        type_delay_ms: float | None,
+        timeout_seconds: float,
+    ) -> "WebInputElement":
+        current_length = int(
+            self.locator.evaluate(
+                """
+                element => {
+                    const value = String(element.value ?? '');
+                    element.focus();
+                    return value.length;
+                }
+                """
+            )
+            or 0
+        )
+        restore_type = self._move_caret(
+            current_length,
+            current_length=current_length,
+            timeout_seconds=timeout_seconds,
+        )
+        try:
+            delete_count = min(max(remove_chars, 0), current_length)
+            resolved_backspace_delay = (
+                self.recorder.typed_character_delay * 1000
+                if backspace_delay_ms is None
+                else backspace_delay_ms
+            )
+            for _ in range(delete_count):
+                self._press_edit_key("Backspace", timeout_seconds=timeout_seconds)
+                if resolved_backspace_delay > 0:
+                    time.sleep(resolved_backspace_delay / 1000)
+
+            resolved_type_delay = (
+                self.recorder.typed_character_delay * 1000
+                if type_delay_ms is None
+                else type_delay_ms
+            )
+            self._type_edit_text(
+                value,
+                delay=resolved_type_delay,
+                timeout_seconds=timeout_seconds,
+            )
+        finally:
+            self._restore_input_type(restore_type)
+        return self
+
+    def select_text(
+        self,
+        text: str | None = None,
+        *,
+        start: int | None = None,
+        end: int | None = None,
+        occurrence: int = 1,
+        drag: bool = True,
+        steps: int = 12,
+        timeout_seconds: float = 10.0,
+        highlight: bool = True,
+    ) -> "WebInputElement":
+        """Select text in an input or textarea, optionally by mouse drag."""
+
+        if highlight:
+            self.highlight()
+        value = str(self.locator.evaluate("element => String(element.value ?? '')"))
+        resolved_start, resolved_end = self._resolve_text_selection(
+            value,
+            text=text,
+            start=start,
+            end=end,
+            occurrence=occurrence,
+        )
+
+        if drag and resolved_start != resolved_end:
+            points = self.locator.evaluate(
+                """
+                (element, args) => {
+                    const value = String(element.value ?? '');
+                    const style = window.getComputedStyle(element);
+                    const rect = element.getBoundingClientRect();
+                    element.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'center',
+                        inline: 'center',
+                    });
+                    element.focus();
+
+                    const clamp = (number, min, max) => Math.min(Math.max(number, min), max);
+                    const number = value => Number.parseFloat(value) || 0;
+                    const font = style.font || [
+                        style.fontStyle,
+                        style.fontVariant,
+                        style.fontWeight,
+                        style.fontSize,
+                        style.fontFamily,
+                    ].filter(Boolean).join(' ');
+
+                    const inputPoint = offset => {
+                        const canvas = document.createElement('canvas');
+                        const context = canvas.getContext('2d');
+                        if (context) {
+                            context.font = font;
+                        }
+                        const measured = context
+                            ? context.measureText(value.slice(0, offset)).width
+                            : 0;
+                        const left = rect.left + number(style.borderLeftWidth) + number(style.paddingLeft);
+                        const right = rect.right - number(style.borderRightWidth) - number(style.paddingRight);
+                        const x = clamp(left + measured - element.scrollLeft, left, right);
+                        return { x, y: rect.top + (rect.height / 2) };
+                    };
+
+                    const textareaPoint = offset => {
+                        const mirror = document.createElement('div');
+                        const span = document.createElement('span');
+                        Object.assign(mirror.style, {
+                            position: 'fixed',
+                            left: `${rect.left}px`,
+                            top: `${rect.top}px`,
+                            width: `${rect.width}px`,
+                            visibility: 'hidden',
+                            whiteSpace: 'pre-wrap',
+                            overflowWrap: 'break-word',
+                            boxSizing: style.boxSizing,
+                            font,
+                            lineHeight: style.lineHeight,
+                            letterSpacing: style.letterSpacing,
+                            padding: style.padding,
+                            border: style.border,
+                        });
+                        mirror.textContent = value.slice(0, offset);
+                        span.textContent = '\\u200b';
+                        mirror.appendChild(span);
+                        document.body.appendChild(mirror);
+                        const spanRect = span.getBoundingClientRect();
+                        const point = {
+                            x: clamp(spanRect.left, rect.left + 4, rect.right - 4),
+                            y: clamp(spanRect.top + (spanRect.height / 2), rect.top + 4, rect.bottom - 4),
+                        };
+                        mirror.remove();
+                        return point;
+                    };
+
+                    const pointFor = element instanceof HTMLTextAreaElement
+                        ? textareaPoint
+                        : inputPoint;
+                    return {
+                        from: pointFor(args.start),
+                        to: pointFor(args.end),
+                    };
+                }
+                """,
+                {"start": resolved_start, "end": resolved_end},
+            )
+            mouse = self.recorder.current_page.mouse
+            mouse.move(points["from"]["x"], points["from"]["y"])
+            mouse.down()
+            mouse.move(points["to"]["x"], points["to"]["y"], steps=max(1, steps))
+            mouse.up()
+
+        self.locator.evaluate(
+            """
+            (element, args) => {
+                element.focus();
+                if (typeof element.setSelectionRange === 'function') {
+                    try {
+                        element.setSelectionRange(args.start, args.end);
+                    } catch {
+                    }
+                }
+            }
+            """,
+            {"start": resolved_start, "end": resolved_end},
+        )
+        return self
+
+    def select_all(
+        self,
+        *,
+        timeout_seconds: float = 10.0,
+        highlight: bool = True,
+    ) -> "WebInputElement":
+        if highlight:
+            self.highlight()
+        self.locator.click(timeout=timeout_seconds * 1000)
+        self.locator.press("ControlOrMeta+A", timeout=timeout_seconds * 1000)
+        return self
+
+    def clear_selection(
+        self,
+        *,
+        key: Literal["Backspace", "Delete"] = "Backspace",
+        timeout_seconds: float = 10.0,
+    ) -> "WebInputElement":
+        self.locator.evaluate("element => element.focus()")
+        self.locator.press(key, timeout=timeout_seconds * 1000)
+        return self
+
+    def copy(self, *, timeout_seconds: float = 10.0) -> "WebInputElement":
+        self.locator.evaluate("element => element.focus()")
+        self.locator.press("ControlOrMeta+C", timeout=timeout_seconds * 1000)
+        return self
+
+    def cut(self, *, timeout_seconds: float = 10.0) -> "WebInputElement":
+        self.locator.evaluate("element => element.focus()")
+        self.locator.press("ControlOrMeta+X", timeout=timeout_seconds * 1000)
+        return self
+
+    def paste(
+        self,
+        text: str | None = None,
+        *,
+        timeout_seconds: float = 10.0,
+    ) -> "WebInputElement":
+        self.locator.evaluate("element => element.focus()")
+        if text is not None:
+            self._write_clipboard_text(text)
+        self.locator.press("ControlOrMeta+V", timeout=timeout_seconds * 1000)
+        return self
+
+    def select_clear(
+        self,
+        wait_seconds: float = 0.5,
+        *,
+        key: Literal["Backspace", "Delete"] = "Backspace",
+        timeout_seconds: float = 10.0,
+        highlight: bool = True,
+    ) -> "WebInputElement":
+        self.select_all(timeout_seconds=timeout_seconds, highlight=highlight)
+        self._wait_between_steps(wait_seconds)
+        self.clear_selection(key=key, timeout_seconds=timeout_seconds)
+        return self
+
+    def select_paste(
+        self,
+        wait_seconds: float = 0.5,
+        text: str | None = None,
+        *,
+        timeout_seconds: float = 10.0,
+        highlight: bool = True,
+    ) -> "WebInputElement":
+        self.select_all(timeout_seconds=timeout_seconds, highlight=highlight)
+        self._wait_between_steps(wait_seconds)
+        self.paste(text, timeout_seconds=timeout_seconds)
+        return self
+
+    def select_clear_paste(
+        self,
+        wait_seconds: float = 0.5,
+        text: str | None = None,
+        *,
+        key: Literal["Backspace", "Delete"] = "Backspace",
+        timeout_seconds: float = 10.0,
+        highlight: bool = True,
+    ) -> "WebInputElement":
+        self.select_all(timeout_seconds=timeout_seconds, highlight=highlight)
+        self.copy(timeout_seconds=timeout_seconds)
+        self._wait_between_steps(wait_seconds)
+        self.clear_selection(key=key, timeout_seconds=timeout_seconds)
+        self._wait_between_steps(wait_seconds)
+        self.paste(text, timeout_seconds=timeout_seconds)
+        return self
+
     def set_value(
         self,
         value: str | int | float,
@@ -400,6 +735,165 @@ class WebInputElement(WebElement):
             {"value": value, "duration": duration_ms},
         )
         return self
+
+    @staticmethod
+    def _diff_text_edits(current: str, target: str) -> list[tuple[int, int, str]]:
+        return [
+            (i1, i2, target[j1:j2])
+            for tag, i1, i2, j1, j2 in SequenceMatcher(
+                a=current,
+                b=target,
+                autojunk=False,
+            ).get_opcodes()
+            if tag != "equal"
+        ]
+
+    def _move_caret(
+        self,
+        position: int,
+        *,
+        current_length: int,
+        timeout_seconds: float,
+    ) -> str | None:
+        result = self.locator.evaluate(
+            """
+            (element, args) => {
+                element.focus();
+                const setPosition = () => {
+                    if (typeof element.setSelectionRange !== 'function') {
+                        return false;
+                    }
+                    try {
+                        element.setSelectionRange(args.position, args.position);
+                        return true;
+                    } catch {
+                        return false;
+                    }
+                };
+
+                if (setPosition()) {
+                    return { moved: true, restoreType: null };
+                }
+
+                if (element instanceof HTMLInputElement) {
+                    const originalType = element.type;
+                    try {
+                        element.type = 'text';
+                        if (setPosition()) {
+                            return { moved: true, restoreType: originalType };
+                        }
+                    } catch {
+                    }
+                    try {
+                        element.type = originalType;
+                    } catch {
+                    }
+                }
+
+                return { moved: false, restoreType: null };
+            }
+            """,
+            {"position": position},
+        )
+        if isinstance(result, dict) and result.get("moved"):
+            restore_type = result.get("restoreType")
+            return str(restore_type) if restore_type else None
+
+        self.locator.press("ControlOrMeta+ArrowRight", timeout=timeout_seconds * 1000)
+        self.locator.press("End", timeout=timeout_seconds * 1000)
+        for _ in range(max(current_length - position, 0)):
+            self.locator.press("ArrowLeft", timeout=timeout_seconds * 1000)
+        return None
+
+    def _press_edit_key(self, key: str, *, timeout_seconds: float) -> None:
+        if self.recorder.page is not None:
+            del timeout_seconds
+            self.recorder.current_page.keyboard.press(key)
+            return
+        self.locator.press(key, timeout=timeout_seconds * 1000)
+
+    def _type_edit_text(
+        self,
+        text: str,
+        *,
+        delay: float,
+        timeout_seconds: float,
+    ) -> None:
+        if self.recorder.page is not None:
+            del timeout_seconds
+            self.recorder.current_page.keyboard.type(text, delay=delay)
+            return
+        self.locator.type(text, delay=delay, timeout=timeout_seconds * 1000)
+
+    def _restore_input_type(self, input_type: str | None) -> None:
+        if input_type is None:
+            return
+        self.recorder.current_page.evaluate(
+            """
+            inputType => {
+                const element = document.activeElement;
+                if (element instanceof HTMLInputElement) {
+                    element.type = inputType;
+                }
+            }
+            """,
+            input_type,
+        )
+
+    def _wait_between_steps(self, seconds: float) -> None:
+        if seconds > 0:
+            self.recorder.wait(seconds)
+
+    @staticmethod
+    def _resolve_text_selection(
+        value: str,
+        *,
+        text: str | None,
+        start: int | None,
+        end: int | None,
+        occurrence: int,
+    ) -> tuple[int, int]:
+        if text is not None:
+            if occurrence < 1:
+                raise ValueError("occurrence must be 1 or greater.")
+            offset = -1
+            search_from = 0
+            for _ in range(occurrence):
+                offset = value.find(text, search_from)
+                if offset == -1:
+                    raise RecordingError(
+                        f"Could not find text {text!r} in the input value."
+                    )
+                search_from = offset + len(text)
+            return offset, offset + len(text)
+
+        value_length = len(value)
+        resolved_start = 0 if start is None else start
+        resolved_end = value_length if end is None else end
+        resolved_start = min(max(resolved_start, 0), value_length)
+        resolved_end = min(max(resolved_end, 0), value_length)
+        if resolved_start > resolved_end:
+            resolved_start, resolved_end = resolved_end, resolved_start
+        return resolved_start, resolved_end
+
+    def _write_clipboard_text(self, text: str) -> None:
+        page = self.recorder.current_page
+        parsed = urlparse(page.url)
+        if parsed.scheme and parsed.netloc:
+            origin = f"{parsed.scheme}://{parsed.netloc}"
+            try:
+                page.context.grant_permissions(
+                    ["clipboard-read", "clipboard-write"],
+                    origin=origin,
+                )
+            except Exception:
+                pass
+        try:
+            page.evaluate("text => navigator.clipboard.writeText(text)", text)
+        except Exception as exc:
+            raise RecordingError(
+                "Could not write text to the browser clipboard."
+            ) from exc
 
     def set_range(
         self,

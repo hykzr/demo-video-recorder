@@ -349,6 +349,7 @@
         gender: data.get("gender") || "Not provided",
         salary: document.querySelector("#salary-tier option:checked").textContent,
         travel: `${data.get("travel_readiness")} out of 10`,
+        notes: data.get("notes") || "Not provided",
         terms: data.get("terms") ? "Accepted" : "Not accepted",
       };
 

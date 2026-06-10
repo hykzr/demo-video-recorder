@@ -114,6 +114,7 @@ def main():
         r.explain("The local web app is open.")
         r.find_input(label="Email address").fill("ada@example.com")
         r.find_select(label="Plan").select_option(label="Pro")
+        r.find_input(label="Notes").select_clear_paste(0.5)
         r.find(role="button", name="Continue").click()
         r.find("main", text="Welcome").highlight()
         r.explain("The workflow is complete and the confirmation is visible.")
@@ -136,7 +137,8 @@ Useful Web UI helpers:
 - `find_input(...)`: finds `input` and `textarea` controls.
 - `find_select(...)`: finds `select` controls.
 - Element methods include `highlight()`, `click()`, `double_click()`, `hover()`, `wait()`, `text()`, and `attribute()`.
-- Input methods include `fill()`, `type()`, `clear()`, `set_range()`, `set_date()`, `set_color()`, `set_files()`, `press()`, `check()`, `uncheck()`, and `select_option()`.
+- Input methods include `fill()`, `type()`, `clear()`, `edit_text()`, `select_text()`, `select_all()`, `clear_selection()`, `copy()`, `cut()`, `paste()`, `select_clear()`, `select_paste()`, `select_clear_paste()`, `set_range()`, `set_date()`, `set_color()`, `set_files()`, `press()`, `check()`, `uncheck()`, and `select_option()`.
+- Use `edit_text()` when you want a correction to look human: it finds the smallest text changes, presses Backspace for removed characters, then types inserted text. Use `select_text(...)` for visible mouse-drag selection, or `select_clear_paste(0.5)` for clipboard-style demos with pauses between selection, clearing, and pasting.
 
 `find()` accepts Beautiful Soup style names and attrs plus Playwright-friendly selectors:
 

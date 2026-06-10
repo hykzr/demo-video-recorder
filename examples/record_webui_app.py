@@ -160,6 +160,8 @@ def main(argv: list[str] | None = None) -> int:
         preferences,
         finish,
         conclusion,
+        corrections,
+        resubmitted,
     ) = recorder.prepare_cues(
         [
             "Let's fill out this member intake form.",
@@ -168,6 +170,8 @@ def main(argv: list[str] | None = None) -> int:
             "Now come gender, salary tier, and travel readiness.",
             "Finally, I'll add notes, accept terms, and review.",
             "The review panel confirms the submitted intake details.",
+            "If a detail is wrong, the form can be edited and submitted again.",
+            "The review panel now reflects the corrected intake details.",
         ],
         async_tts=args.async_tts,
     )
@@ -211,6 +215,25 @@ def main(argv: list[str] | None = None) -> int:
         recorder.find("aside", text="1991-08-14")
         recorder.find("aside", text="Accepted")
         recorder.explain(conclusion)
+
+        recorder.explain(corrections)
+        recorder.find_input(label="Date of birth", type="date").set_date("1990-08-14")
+        recorder.find_input(label="Preferred color", type="color").set_color("#725ac1")
+        recorder.find_select(label="Salary tier").select_option(
+            label="$150,000 or more"
+        )
+        email = recorder.find_input(label="Email address", type="email")
+        email.select_text("maya.chen")
+        email.edit_text("maya.chen+intake@example.com")
+        notes = recorder.find_input(label="Notes")
+        notes.select_clear_paste(0.5)
+        recorder.find("button", text="Review intake details").click()
+        recorder.find("aside", text="maya.chen+intake@example.com").highlight()
+        recorder.find("aside", text="1990-08-14")
+        recorder.find("aside", text="#725ac1")
+        recorder.find("aside", text="$150,000 or more")
+        recorder.find("aside", text="Prefers a morning call")
+        recorder.explain(resubmitted)
 
         if args.no_record and args.tts:
             final_path = recorder.render_narration_audio(

@@ -240,7 +240,8 @@ Useful helpers:
 - `find_select(...)` and `find_all_select(...)` restrict lookup to `select` controls.
 - Element actions include `highlight()`, `click()`, `double_click()`, `hover()`, `wait()`, `text()`, and `attribute()`. Highlights smooth-scroll the target into view.
 - Highlight non-interactive results after actions too: status text, generated answers, charts, tables, metrics, toasts, and result panels.
-- Input/control actions include `fill()`, `type()`, `clear()`, `set_value()`, `set_range()`, `set_date()`, `set_color()`, `set_files()`, `press()`, `check()`, `uncheck()`, and `select_option()`.
+- Input/control actions include `fill()`, `type()`, `clear()`, `edit_text()`, `select_text()`, `select_all()`, `clear_selection()`, `copy()`, `cut()`, `paste()`, `select_clear()`, `select_paste()`, `select_clear_paste()`, `set_value()`, `set_range()`, `set_date()`, `set_color()`, `set_files()`, `press()`, `check()`, `uncheck()`, and `select_option()`.
+- Use `edit_text()` for visible correction flows where only the smallest changed spans are removed with Backspace and retyped. Use `select_text(...)` for mouse-drag text selection and `select_clear_paste(0.5)` for clipboard-style input demos that need visible pauses between selection, clearing, and pasting.
 - Prefer the specific visual actions for native controls: `select_option()` shows options, `set_date()` shows a calendar, `set_color()` shows color swatches, `set_range()` animates movement, and radio/checkbox checks highlight the containing field.
 - Form actions include `submit()`.
 
@@ -370,6 +371,16 @@ class WebInputElement(WebElement)
 - `fill(value, *, timeout_seconds=10.0, highlight=True) -> WebInputElement`
 - `type(text, *, delay_ms=None, timeout_seconds=10.0, highlight=True) -> WebInputElement`
 - `clear(*, timeout_seconds=10.0, highlight=True) -> WebInputElement`
+- `edit_text(value, *, remove_chars=None, backspace_delay_ms=None, type_delay_ms=None, timeout_seconds=10.0, highlight=True) -> WebInputElement`
+- `select_text(text=None, *, start=None, end=None, occurrence=1, drag=True, steps=12, timeout_seconds=10.0, highlight=True) -> WebInputElement`
+- `select_all(*, timeout_seconds=10.0, highlight=True) -> WebInputElement`
+- `clear_selection(*, key="Backspace", timeout_seconds=10.0) -> WebInputElement`
+- `copy(*, timeout_seconds=10.0) -> WebInputElement`
+- `cut(*, timeout_seconds=10.0) -> WebInputElement`
+- `paste(text=None, *, timeout_seconds=10.0) -> WebInputElement`
+- `select_clear(wait_seconds=0.5, *, key="Backspace", timeout_seconds=10.0, highlight=True) -> WebInputElement`
+- `select_paste(wait_seconds=0.5, text=None, *, timeout_seconds=10.0, highlight=True) -> WebInputElement`
+- `select_clear_paste(wait_seconds=0.5, text=None, *, key="Backspace", timeout_seconds=10.0, highlight=True) -> WebInputElement`
 - `set_value(value, *, highlight=True, duration_ms=800) -> WebInputElement`
 - `set_range(value, *, duration_ms=800, highlight=True) -> WebInputElement`
 - `set_date(value, *, preview_ms=900, highlight=True) -> WebInputElement`
