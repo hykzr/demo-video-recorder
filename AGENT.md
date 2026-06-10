@@ -242,7 +242,7 @@ Useful helpers:
 - Highlight non-interactive results after actions too: status text, generated answers, charts, tables, metrics, toasts, and result panels.
 - Input/control actions include `fill()`, `type()`, `clear()`, `edit_text()`, `select_text()`, `select_all()`, `clear_selection()`, `copy()`, `cut()`, `paste()`, `select_clear()`, `select_paste()`, `select_clear_paste()`, `set_value()`, `set_range()`, `set_date()`, `set_color()`, `set_files()`, `press()`, `check()`, `uncheck()`, and `select_option()`.
 - Use `edit_text()` for visible correction flows where only the smallest changed spans are removed with Backspace and retyped. Use `select_text(...)` for mouse-drag text selection and `select_clear_paste(0.5)` for clipboard-style input demos that need visible pauses between selection, clearing, and pasting.
-- Prefer the specific visual actions for native controls: `select_option()` shows options, `set_date()` shows a calendar, `set_color()` shows color swatches, `set_range()` animates movement, and radio/checkbox checks highlight the containing field.
+- Prefer the specific visual actions for native controls: `select_option()` shows the current option and then highlights the target option, `set_date()` steps through year/month/day panels before applying the date, `set_color()` shows the current swatch before highlighting the target swatch, `set_range()` animates movement, and radio/checkbox checks highlight the containing field.
 - Form actions include `submit()`.
 
 Prefer robust selectors in this order: role and accessible name, label/placeholder/test id, then CSS selector. Use `find_optional()` when a conditional banner, modal, or toast may or may not appear.

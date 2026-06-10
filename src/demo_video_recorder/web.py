@@ -910,7 +910,7 @@ class WebInputElement(WebElement):
         self,
         value: str,
         *,
-        preview_ms: int = 900,
+        preview_ms: int = 1800,
         highlight: bool = True,
     ) -> "WebInputElement":
         """Set a date input while briefly showing a recorder-friendly calendar."""
@@ -920,20 +920,34 @@ class WebInputElement(WebElement):
         self.locator.evaluate(
             """
             async (element, args) => {
-                const date = new Date(`${args.value}T12:00:00`);
-                if (Number.isNaN(date.getTime())) {
+                const targetDate = new Date(`${args.value}T12:00:00`);
+                if (Number.isNaN(targetDate.getTime())) {
                     return;
                 }
+
+                const currentDate = element.value
+                    ? new Date(`${element.value}T12:00:00`)
+                    : targetDate;
+                const startDate = Number.isNaN(currentDate.getTime())
+                    ? targetDate
+                    : currentDate;
+                const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+                const stepDelay = Math.max(260, Math.round(args.preview / 4));
+                const clickDelay = Math.max(180, Math.round(stepDelay * 0.55));
+                const monthNames = Array.from({ length: 12 }, (_, index) => (
+                    new Date(2024, index, 1).toLocaleString(undefined, { month: 'short' })
+                ));
+                const weekdays = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
                 const overlay = document.createElement('div');
                 overlay.setAttribute('data-demo-recorder-picker', 'date');
                 const rect = element.getBoundingClientRect();
                 Object.assign(overlay.style, {
                     position: 'fixed',
-                    left: `${Math.min(rect.left, window.innerWidth - 286)}px`,
-                    top: `${Math.min(rect.bottom + 8, window.innerHeight - 294)}px`,
+                    left: `${Math.min(rect.left, window.innerWidth - 308)}px`,
+                    top: `${Math.min(rect.bottom + 8, window.innerHeight - 328)}px`,
                     zIndex: '2147483647',
-                    width: '278px',
+                    width: '300px',
                     padding: '14px',
                     border: '1px solid #9fb2c4',
                     borderRadius: '8px',
@@ -942,38 +956,103 @@ class WebInputElement(WebElement):
                     boxShadow: '0 18px 48px rgba(30, 47, 64, 0.24)',
                     font: '13px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
                 });
-
-                const month = date.toLocaleString(undefined, {
-                    month: 'long',
-                    year: 'numeric',
-                });
-                const first = new Date(date.getFullYear(), date.getMonth(), 1);
-                const days = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
-                const selectedDay = date.getDate();
-                const weekdays = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-                const cells = [];
-                for (let i = 0; i < first.getDay(); i += 1) {
-                    cells.push('<span></span>');
-                }
-                for (let day = 1; day <= days; day += 1) {
-                    const selected = day === selectedDay;
-                    cells.push(`<span style="
-                        display:grid;place-items:center;height:30px;border-radius:6px;
-                        ${selected ? 'background:#1f6f8b;color:white;font-weight:760;' : ''}
-                    ">${day}</span>`);
-                }
-
-                overlay.innerHTML = `
-                    <div style="font-weight:760;margin-bottom:10px;">${month}</div>
-                    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;color:#536270;margin-bottom:5px;text-align:center;font-weight:700;">
-                        ${weekdays.map(day => `<span>${day}</span>`).join('')}
-                    </div>
-                    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;">
-                        ${cells.join('')}
-                    </div>
-                `;
                 document.body.appendChild(overlay);
-                await new Promise(resolve => setTimeout(resolve, args.preview));
+
+                const cellStyle = (active, target) => `
+                    display:grid;place-items:center;height:32px;border-radius:6px;
+                    border:${target ? '3px solid #ffbf00' : '1px solid transparent'};
+                    ${active ? 'background:#1f6f8b;color:white;font-weight:760;' : ''}
+                    ${target ? 'box-shadow:0 0 0 3px rgba(255,191,0,.25);font-weight:760;' : ''}
+                `;
+                const cursor = '<span style="position:absolute;right:6px;bottom:5px;width:12px;height:12px;border-radius:999px;background:#17212c;box-shadow:0 0 0 4px rgba(23,33,44,.14);"></span>';
+                const wrapTarget = (content, active, target) => `
+                    <span style="position:relative;${cellStyle(active, target)}">
+                        ${content}${target ? cursor : ''}
+                    </span>
+                `;
+
+                const renderYears = targetActive => {
+                    const currentYear = startDate.getFullYear();
+                    const targetYear = targetDate.getFullYear();
+                    const firstYear = Math.min(currentYear, targetYear) - 3;
+                    const years = Array.from({ length: 12 }, (_, index) => firstYear + index);
+                    overlay.innerHTML = `
+                        <div style="font-weight:760;margin-bottom:10px;">Year</div>
+                        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:7px;text-align:center;">
+                            ${years.map(year => wrapTarget(
+                                year,
+                                year === currentYear && !targetActive,
+                                targetActive && year === targetYear,
+                            )).join('')}
+                        </div>
+                    `;
+                };
+
+                const renderMonths = targetActive => {
+                    const currentMonth = startDate.getMonth();
+                    const targetMonth = targetDate.getMonth();
+                    overlay.innerHTML = `
+                        <div style="font-weight:760;margin-bottom:10px;">${targetDate.getFullYear()}</div>
+                        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:7px;text-align:center;">
+                            ${monthNames.map((month, index) => wrapTarget(
+                                month,
+                                index === currentMonth && !targetActive,
+                                targetActive && index === targetMonth,
+                            )).join('')}
+                        </div>
+                    `;
+                };
+
+                const renderDays = targetActive => {
+                    const viewDate = targetActive ? targetDate : startDate;
+                    const first = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1);
+                    const days = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0).getDate();
+                    const cells = [];
+                    for (let i = 0; i < first.getDay(); i += 1) {
+                        cells.push('<span></span>');
+                    }
+                    for (let day = 1; day <= days; day += 1) {
+                        const isCurrent = (
+                            viewDate.getFullYear() === startDate.getFullYear()
+                            && viewDate.getMonth() === startDate.getMonth()
+                            && day === startDate.getDate()
+                        );
+                        const isTarget = day === targetDate.getDate();
+                        cells.push(wrapTarget(day, isCurrent && !targetActive, targetActive && isTarget));
+                    }
+                    overlay.innerHTML = `
+                        <div style="font-weight:760;margin-bottom:10px;">
+                            ${viewDate.toLocaleString(undefined, { month: 'long', year: 'numeric' })}
+                        </div>
+                        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;color:#536270;margin-bottom:5px;text-align:center;font-weight:700;">
+                            ${weekdays.map(day => `<span>${day}</span>`).join('')}
+                        </div>
+                        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;">
+                            ${cells.join('')}
+                        </div>
+                    `;
+                };
+
+                if (startDate.getFullYear() !== targetDate.getFullYear()) {
+                    renderYears(false);
+                    await wait(stepDelay);
+                    renderYears(true);
+                    await wait(clickDelay);
+                }
+                if (
+                    startDate.getFullYear() !== targetDate.getFullYear()
+                    || startDate.getMonth() !== targetDate.getMonth()
+                ) {
+                    renderMonths(false);
+                    await wait(stepDelay);
+                    renderMonths(true);
+                    await wait(clickDelay);
+                }
+
+                renderDays(false);
+                await wait(stepDelay);
+                renderDays(true);
+                await wait(clickDelay);
                 overlay.remove();
             }
             """,
@@ -986,7 +1065,7 @@ class WebInputElement(WebElement):
         self,
         value: str,
         *,
-        preview_ms: int = 900,
+        preview_ms: int = 1100,
         highlight: bool = True,
     ) -> "WebInputElement":
         """Set a color input while briefly showing a color chooser preview."""
@@ -996,12 +1075,14 @@ class WebInputElement(WebElement):
         self.locator.evaluate(
             """
             async (element, args) => {
-                const targetColor = String(args.value);
+                const targetColor = String(args.value).toLowerCase();
+                const currentColor = String(element.value || '').toLowerCase();
                 const rect = element.getBoundingClientRect();
-                const swatches = [
+                const swatches = Array.from(new Set([
                     '#1f6f8b', '#146348', '#f7c767', '#c94f4f',
-                    '#725ac1', '#17212c', '#ffffff', targetColor,
-                ];
+                    '#725ac1', '#17212c', '#ffffff', currentColor, targetColor,
+                ].filter(Boolean)));
+                const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
                 const overlay = document.createElement('div');
                 overlay.setAttribute('data-demo-recorder-picker', 'color');
                 Object.assign(overlay.style, {
@@ -1018,22 +1099,32 @@ class WebInputElement(WebElement):
                     boxShadow: '0 18px 48px rgba(30, 47, 64, 0.24)',
                     font: '13px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
                 });
-                overlay.innerHTML = `
-                    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-                        <span style="display:block;width:34px;height:34px;border-radius:7px;border:1px solid #9fb2c4;background:${targetColor};"></span>
-                        <strong>${targetColor}</strong>
-                    </div>
-                    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">
-                        ${swatches.map(color => `
-                            <span style="
-                                display:block;height:32px;border-radius:7px;background:${color};
-                                border:${color.toLowerCase() === targetColor.toLowerCase() ? '3px solid #1f6f8b' : '1px solid #9fb2c4'};
-                            "></span>
-                        `).join('')}
-                    </div>
-                `;
+                const render = targetActive => {
+                    overlay.innerHTML = `
+                        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+                            <span style="display:block;width:34px;height:34px;border-radius:7px;border:1px solid #9fb2c4;background:${targetActive ? targetColor : currentColor};"></span>
+                            <strong>${targetActive ? targetColor : currentColor}</strong>
+                        </div>
+                        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">
+                            ${swatches.map(color => {
+                                const isCurrent = color.toLowerCase() === currentColor;
+                                const isTarget = color.toLowerCase() === targetColor;
+                                return `
+                                    <span style="
+                                        position:relative;display:block;height:32px;border-radius:7px;background:${color};
+                                        border:${targetActive && isTarget ? '3px solid #ffbf00' : isCurrent && !targetActive ? '3px solid #1f6f8b' : '1px solid #9fb2c4'};
+                                        box-shadow:${targetActive && isTarget ? '0 0 0 3px rgba(255,191,0,.25)' : 'none'};
+                                    ">${targetActive && isTarget ? '<span style="position:absolute;right:4px;bottom:4px;width:10px;height:10px;border-radius:999px;background:#17212c;box-shadow:0 0 0 4px rgba(23,33,44,.14);"></span>' : ''}</span>
+                                `;
+                            }).join('')}
+                        </div>
+                    `;
+                };
                 document.body.appendChild(overlay);
-                await new Promise(resolve => setTimeout(resolve, args.preview));
+                render(false);
+                await wait(Math.max(250, Math.round(args.preview * 0.45)));
+                render(true);
+                await wait(Math.max(250, Math.round(args.preview * 0.55)));
                 overlay.remove();
             }
             """,
@@ -1148,7 +1239,7 @@ class WebSelectElement(WebInputElement):
                     index: first(args.index),
                 };
                 const options = Array.from(element.options);
-                const selectedIndex = options.findIndex((option, optionIndex) => {
+                const targetIndex = options.findIndex((option, optionIndex) => {
                     if (target.index !== null && target.index !== undefined) {
                         return optionIndex === Number(target.index);
                     }
@@ -1160,6 +1251,8 @@ class WebSelectElement(WebInputElement):
                     }
                     return option.selected;
                 });
+                const currentIndex = Math.max(options.findIndex(option => option.selected), 0);
+                const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
                 const rect = element.getBoundingClientRect();
                 const overlay = document.createElement('div');
                 overlay.setAttribute('data-demo-recorder-picker', 'select');
@@ -1179,15 +1272,31 @@ class WebSelectElement(WebInputElement):
                     boxShadow: '0 18px 48px rgba(30, 47, 64, 0.24)',
                     font: '14px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
                 });
-                overlay.innerHTML = options.map((option, optionIndex) => `
-                    <div style="
-                        padding:9px 12px;
-                        border-bottom:${optionIndex === options.length - 1 ? '0' : '1px solid #dbe4ec'};
-                        ${optionIndex === selectedIndex ? 'background:#1f6f8b;color:white;font-weight:760;' : ''}
-                    ">${option.text}</div>
-                `).join('');
+                const render = targetActive => {
+                    overlay.innerHTML = options.map((option, optionIndex) => {
+                        const isCurrent = optionIndex === currentIndex;
+                        const isTarget = optionIndex === targetIndex;
+                        return `
+                            <div style="
+                                position:relative;
+                                padding:9px 12px;
+                                border-bottom:${optionIndex === options.length - 1 ? '0' : '1px solid #dbe4ec'};
+                                outline:${targetActive && isTarget ? '3px solid #ffbf00' : '0'};
+                                outline-offset:-3px;
+                                ${!targetActive && isCurrent ? 'background:#1f6f8b;color:white;font-weight:760;' : ''}
+                                ${targetActive && isTarget ? 'background:#eaf5fb;color:#17212c;font-weight:760;' : ''}
+                            ">
+                                ${option.text}
+                                ${targetActive && isTarget ? '<span style="position:absolute;right:10px;top:50%;width:11px;height:11px;transform:translateY(-50%);border-radius:999px;background:#17212c;box-shadow:0 0 0 4px rgba(23,33,44,.14);"></span>' : ''}
+                            </div>
+                        `;
+                    }).join('');
+                };
                 document.body.appendChild(overlay);
-                await new Promise(resolve => setTimeout(resolve, args.preview));
+                render(false);
+                await wait(Math.max(250, Math.round(args.preview * 0.45)));
+                render(true);
+                await wait(Math.max(250, Math.round(args.preview * 0.55)));
                 overlay.remove();
             }
             """,
