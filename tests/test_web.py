@@ -358,8 +358,8 @@ def test_check_and_uncheck_highlight_the_containing_field(tmp_path) -> None:
         args for script, args in locator.evaluate_calls if "scrollIntoView" in script
     ]
     assert highlight_args == [
-        {"duration": 700, "scope": "field"},
-        {"duration": 700, "scope": "field"},
+        {"duration": 700, "scrollDuration": 450, "scope": "field"},
+        {"duration": 700, "scrollDuration": 450, "scope": "field"},
     ]
     assert locator.checked is True
     assert locator.unchecked is True

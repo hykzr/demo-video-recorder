@@ -13,11 +13,13 @@ from demo_video_recorder import (
     EdgeTTSBackend,
     FAST_SMOKE_TEST_DEFAULTS,
     NativeTTSBackend,
+    SynthesizedExplanation,
     WebUIRecorder,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB_APP = Path(__file__).with_name("webui_app")
+Cue = str | SynthesizedExplanation
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -122,6 +124,35 @@ def build_tts_backend(args: argparse.Namespace, save_dir: Path):
     )
 
 
+def cue_duration(recorder: WebUIRecorder, cue: Cue) -> float:
+    if isinstance(cue, SynthesizedExplanation):
+        return cue.audio.duration_seconds
+    return recorder.subtitles.read_delay_seconds(cue)
+
+
+def explain_over_actions(
+    recorder: WebUIRecorder,
+    cue: Cue,
+    action,
+    *,
+    tail_seconds: float = 0.2,
+) -> None:
+    started_at = recorder.subtitles.elapsed_seconds()
+    recorder.explain(cue, wait=False)
+    action()
+    remaining = cue_duration(recorder, cue) - (
+        recorder.subtitles.elapsed_seconds() - started_at
+    )
+    if remaining > 0:
+        recorder.wait(remaining + tail_seconds)
+    else:
+        recorder.wait(tail_seconds)
+
+
+def pause(recorder: WebUIRecorder, args: argparse.Namespace, seconds: float = 0.28) -> None:
+    recorder.wait(min(seconds, 0.08) if args.fast else seconds)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     settings = FAST_SMOKE_TEST_DEFAULTS if args.fast else DEFAULTS
@@ -146,6 +177,7 @@ def main(argv: list[str] | None = None) -> int:
         output_path,
         headless=not args.headed,
         viewport=(1280, 720),
+        slow_mo_ms=0 if args.fast else 80,
         keep_raw=False,
         keep_tts_audio=args.keep_tts_audio,
         tts=tts_backend,
@@ -180,59 +212,122 @@ def main(argv: list[str] | None = None) -> int:
         recorder.serve(WEB_APP, args.port)
         recorder.open_web("/", start_recording=not args.no_record)
         recorder.explain(intro)
+        pause(recorder, args, 0.4)
 
-        recorder.explain(contact_details)
-        recorder.find_input(label="Full name", _class="contact-input").fill("Maya Chen")
-        recorder.find_input(label="Email address", type="email").fill(
-            "maya.chen@example.com"
-        )
-        recorder.find_input(label="Telephone", type="tel").fill("+1 415 555 0198")
-        recorder.find_input(label="Street address", _class="address-input").fill(
-            "212 Market Street"
-        )
-        recorder.find_input(label="City", _class="address-input").fill("San Francisco")
-        recorder.find_input(label="Postal code", _class="address-input").fill("94105")
+        def enter_contact_details() -> None:
+            recorder.find_input(label="Full name", _class="contact-input").fill(
+                "Maya Chen"
+            )
+            pause(recorder, args)
+            recorder.find_input(label="Email address", type="email").fill(
+                "maya.chen@example.com"
+            )
+            pause(recorder, args)
+            recorder.find_input(label="Telephone", type="tel").fill("+1 415 555 0198")
+            pause(recorder, args)
+            recorder.find_input(label="Street address", _class="address-input").fill(
+                "212 Market Street"
+            )
+            pause(recorder, args)
+            recorder.find_input(label="City", _class="address-input").fill(
+                "San Francisco"
+            )
+            pause(recorder, args)
+            recorder.find_input(label="Postal code", _class="address-input").fill(
+                "94105"
+            )
 
-        recorder.explain(profile_details)
-        recorder.find_input(label="Date of birth", type="date").set_date("1991-08-14")
-        recorder.find_input(label="Preferred color", type="color").set_color("#146348")
-
-        recorder.explain(preferences)
-        recorder.find_input("input", {"name": "gender", "value": "Female"}).check()
-        recorder.find_select(label="Salary tier").select_option(
-            label="$100,000 to $150,000"
+        explain_over_actions(
+            recorder,
+            contact_details,
+            enter_contact_details,
         )
-        recorder.find_input("input", type="range").set_range(8)
-        recorder.find("output", id="travel-output", text="8").highlight()
 
-        recorder.explain(finish)
-        recorder.find_input(label="Notes").fill(
-            "Prefers a morning call and wants a practical plan before the end of the week."
+        def enter_profile_details() -> None:
+            recorder.find_input(label="Date of birth", type="date").set_date(
+                "1991-08-14"
+            )
+            pause(recorder, args, 0.35)
+            recorder.find_input(label="Preferred color", type="color").set_color(
+                "#146348"
+            )
+
+        explain_over_actions(
+            recorder,
+            profile_details,
+            enter_profile_details,
         )
-        recorder.find_input("input", id="terms").check()
-        recorder.find("button", text="Review intake details").click()
-        recorder.find("aside", text="Maya Chen").highlight()
-        recorder.find("aside", text="1991-08-14")
-        recorder.find("aside", text="Accepted")
+
+        def enter_preferences() -> None:
+            recorder.find_input("input", {"name": "gender", "value": "Female"}).check()
+            pause(recorder, args, 0.35)
+            recorder.find_select(label="Salary tier").select_option(
+                label="$100,000 to $150,000"
+            )
+            pause(recorder, args, 0.35)
+            recorder.find_input("input", type="range").set_range(8)
+            pause(recorder, args, 0.25)
+            recorder.find("output", id="travel-output", text="8").highlight()
+
+        explain_over_actions(
+            recorder,
+            preferences,
+            enter_preferences,
+        )
+
+        def finish_submission() -> None:
+            recorder.find_input(label="Notes").fill(
+                "Prefers a morning call and wants a practical plan before the end of the week."
+            )
+            pause(recorder, args)
+            recorder.find_input("input", id="terms").check()
+            pause(recorder, args, 0.35)
+            recorder.find("button", text="Review intake details").click()
+            pause(recorder, args, 0.45)
+            recorder.find("aside", text="Maya Chen").highlight()
+            recorder.find("aside", text="1991-08-14")
+            recorder.find("aside", text="Accepted")
+
+        explain_over_actions(
+            recorder,
+            finish,
+            finish_submission,
+        )
         recorder.explain(conclusion)
 
-        recorder.explain(corrections)
-        recorder.find_input(label="Date of birth", type="date").set_date("1990-08-14")
-        recorder.find_input(label="Preferred color", type="color").set_color("#725ac1")
-        recorder.find_select(label="Salary tier").select_option(
-            label="$150,000 or more"
+        def correct_submission() -> None:
+            recorder.find_input(label="Date of birth", type="date").set_date(
+                "1990-08-14"
+            )
+            pause(recorder, args, 0.35)
+            recorder.find_input(label="Preferred color", type="color").set_color(
+                "#725ac1"
+            )
+            pause(recorder, args, 0.35)
+            recorder.find_select(label="Salary tier").select_option(
+                label="$150,000 or more"
+            )
+            pause(recorder, args, 0.35)
+            email = recorder.find_input(label="Email address", type="email")
+            email.select_text("maya.chen")
+            email.edit_text("maya.chen+intake@example.com")
+            pause(recorder, args, 0.35)
+            notes = recorder.find_input(label="Notes")
+            notes.select_clear_paste(0.5 if not args.fast else 0.08)
+            pause(recorder, args, 0.35)
+            recorder.find("button", text="Review intake details").click()
+            pause(recorder, args, 0.45)
+            recorder.find("aside", text="maya.chen+intake@example.com").highlight()
+            recorder.find("aside", text="1990-08-14")
+            recorder.find("aside", text="#725ac1")
+            recorder.find("aside", text="$150,000 or more")
+            recorder.find("aside", text="Prefers a morning call")
+
+        explain_over_actions(
+            recorder,
+            corrections,
+            correct_submission,
         )
-        email = recorder.find_input(label="Email address", type="email")
-        email.select_text("maya.chen")
-        email.edit_text("maya.chen+intake@example.com")
-        notes = recorder.find_input(label="Notes")
-        notes.select_clear_paste(0.5)
-        recorder.find("button", text="Review intake details").click()
-        recorder.find("aside", text="maya.chen+intake@example.com").highlight()
-        recorder.find("aside", text="1990-08-14")
-        recorder.find("aside", text="#725ac1")
-        recorder.find("aside", text="$150,000 or more")
-        recorder.find("aside", text="Prefers a morning call")
         recorder.explain(resubmitted)
 
         if args.no_record and args.tts:

@@ -46,6 +46,7 @@ class WebElement:
         self,
         *,
         duration_ms: int = 700,
+        scroll_duration_ms: int = 450,
         scope: Literal["element", "field"] = "element",
     ) -> "WebElement":
         self.locator.evaluate(
@@ -54,12 +55,64 @@ class WebElement:
                 const target = args.scope === 'field'
                     ? element.closest('label, .field, fieldset, [role="group"]') || element
                     : element;
-                target.scrollIntoView({
-                    behavior: 'smooth',
-                    block: 'center',
-                    inline: 'center',
-                });
-                await new Promise(resolve => setTimeout(resolve, 300));
+                const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+                const ease = progress => 1 - Math.pow(1 - progress, 3);
+                const scrollWindowToTarget = async () => {
+                    const rect = target.getBoundingClientRect();
+                    const startX = window.scrollX;
+                    const startY = window.scrollY;
+                    const maxX = Math.max(
+                        0,
+                        document.documentElement.scrollWidth - window.innerWidth,
+                    );
+                    const maxY = Math.max(
+                        0,
+                        document.documentElement.scrollHeight - window.innerHeight,
+                    );
+                    const endX = Math.min(
+                        Math.max(startX + rect.left - ((window.innerWidth - rect.width) / 2), 0),
+                        maxX,
+                    );
+                    const endY = Math.min(
+                        Math.max(startY + rect.top - ((window.innerHeight - rect.height) / 2), 0),
+                        maxY,
+                    );
+                    const duration = Math.max(0, Number(args.scrollDuration) || 0);
+
+                    if (duration <= 0 || (Math.abs(endX - startX) < 1 && Math.abs(endY - startY) < 1)) {
+                        window.scrollTo(endX, endY);
+                        return;
+                    }
+
+                    const startedAt = performance.now();
+                    await new Promise(resolve => {
+                        const step = now => {
+                            const progress = Math.min((now - startedAt) / duration, 1);
+                            const eased = ease(progress);
+                            window.scrollTo(
+                                startX + ((endX - startX) * eased),
+                                startY + ((endY - startY) * eased),
+                            );
+                            if (progress < 1) {
+                                requestAnimationFrame(step);
+                            } else {
+                                resolve();
+                            }
+                        };
+                        requestAnimationFrame(step);
+                    });
+                };
+
+                try {
+                    await scrollWindowToTarget();
+                } catch {
+                    target.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'center',
+                        inline: 'center',
+                    });
+                    await wait(Math.max(300, Number(args.scrollDuration) || 0));
+                }
 
                 const previousOutline = target.style.outline;
                 const previousOffset = target.style.outlineOffset;
@@ -78,7 +131,11 @@ class WebElement:
                 target.style.borderRadius = previousRadius;
             }
             """,
-            {"duration": duration_ms, "scope": scope},
+            {
+                "duration": duration_ms,
+                "scrollDuration": scroll_duration_ms,
+                "scope": scope,
+            },
         )
         return self
 
