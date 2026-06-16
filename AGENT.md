@@ -55,7 +55,11 @@ Do this before writing or running a recording script:
     - Add script options such as `--smoke`, `--no-tts`, and `--no-animation` when that helps repeated testing.
     - In smoke/no-animation mode, use `FAST_SMOKE_TEST_DEFAULTS`, `typed_character_delay=0`, no Playwright `slow_mo_ms`, shorter waits, and `highlight=False` or shorter highlight durations where appropriate.
     - Fix timing, startup, focus, input, scrolling, and selector issues before enabling narration audio.
+    - When fixing a bug deep in the workflow, first reproduce that specific point with a focused probe, a start-at option, or a small temporary script. Do not repeatedly rerun the full polished recording from the beginning if the failure is in the later stage and can be reached directly.
 12. Monitor every smoke and final pass. If a step is waiting forever, interrupt, inspect logs/processes/output files, and fix the script. Be patient too: browser startup, app boot, ffmpeg burn-in, and TTS generation can legitimately take several minutes.
+    - If TTS preparation seems slow, list the TTS cache folder and count newly created clips.
+    - If capture seems slow, inspect the generated `.srt`; subtitle cues are appended gradually during recording.
+    - If those files are still changing, continue patiently. If one step has made no progress for too long, stop it and probe that step directly.
 13. Check the actual video output, not just the script exit code.
     - Use `ffprobe` to confirm the file exists, has non-zero duration, and has the expected dimensions.
     - Extract representative frames with `ffmpeg`, read those images, and verify the video is not blank, cropped, or missing subtitles.
@@ -97,9 +101,10 @@ Useful helpers when narration audio is enabled:
 - `recorder.synthesize_if_tts_enabled("...")` to prepare narration when TTS is enabled and return plain text otherwise
 - `recorder.synthesize_explanation_audio("...")` to prepare narration text plus audio ahead of time
 - `await recorder.synthesize_if_tts_enabled_async("...")` or `await recorder.synthesize_explanation_audio_async("...")` to prepare clips from async code
-- `recorder.prepare_cues(lines, async_tts=True)` to prepare several clips before capture without duplicating helper code
-- `await recorder.prepare_cues_async(lines)` when already inside async code
+- `recorder.prepare_cues({"intro": "...", "finish": "..."}, async_tts=True)` to prepare named clips before capture without duplicating helper code
+- `await recorder.prepare_cues_async({"intro": "..."})` when already inside async code
 - `recorder.explain(prepared_explanation)` to reuse pre-generated narration without blocking capture
+- `recorder.explain_during(cue, lambda: action())` to run one visible action while the cue plays, then wait out the remaining cue duration before moving on
 
 Prefer this loop:
 
@@ -111,14 +116,17 @@ Prefer this loop:
 Example pre-synthesis:
 
 ```python
-intro, conclusion = recorder.prepare_cues(
-    [
-        "Let's run a fast walkthrough.",
-        "The final result is now visible.",
-    ],
+cues = recorder.prepare_cues(
+    {
+        "intro": "Let's run a fast walkthrough.",
+        "conclusion": "The final result is now visible.",
+    },
     async_tts=True,
 )
+recorder.explain(cues["intro"])
 ```
+
+Strongly avoid large positional cue lists. They are hard for both humans and agents to maintain, and one inserted cue can shift every later action. Use a `dict[str, str]` and refer to cues by name.
 
 If Edge TTS fails, read the full exception. The backend reports speaker, speed, volume, text length, output path, and the original error type/message. First check whether the issue is a bad voice/parameter, missing network access, or a transient service failure. Only switch to `NativeTTSBackend`, `MacOSTTSBackend`, or `WindowsTTSBackend` after the Edge issue is clearly unfixable for the recording run.
 
@@ -238,14 +246,17 @@ Useful helpers:
 - `find_all(...)` returns all matched elements.
 - `find_input(...)` and `find_all_input(...)` restrict lookup to `input` and `textarea` controls.
 - `find_select(...)` and `find_all_select(...)` restrict lookup to `select` controls.
-- Element actions include `highlight()`, `click()`, `double_click()`, `hover()`, `wait()`, `text()`, and `attribute()`. Highlights smooth-scroll the target into view.
+- Element actions include `highlight()`, `smooth_scroll()`, `click()`, `double_click()`, `hover()`, `wait()`, `text()`, `attribute()`, and `copy_text()`. Highlights smooth-scroll the target into view.
 - Highlight non-interactive results after actions too: status text, generated answers, charts, tables, metrics, toasts, and result panels.
 - Input/control actions include `fill()`, `type()`, `clear()`, `edit_text()`, `select_text()`, `select_all()`, `clear_selection()`, `copy()`, `cut()`, `paste()`, `select_clear()`, `select_paste()`, `select_clear_paste()`, `set_value()`, `set_range()`, `set_date()`, `set_color()`, `set_files()`, `press()`, `check()`, `uncheck()`, and `select_option()`.
 - Use `edit_text()` for visible correction flows where only the smallest changed spans are removed with Backspace and retyped. Use `select_text(...)` for mouse-drag text selection and `select_clear_paste(0.5)` for clipboard-style input demos that need visible pauses between selection, clearing, and pasting.
+- Use `copy_text()` for non-editable displayed text such as code blocks. Do not click a code block and press `ControlOrMeta+A`, because that can select the whole page in the recording.
 - Prefer the specific visual actions for native controls: `select_option()` shows the current option and then highlights the target option, `set_date()` steps through year/month/day panels before applying the date, `set_color()` shows the current swatch before highlighting the target swatch, `set_range()` animates movement, and radio/checkbox checks highlight the containing field.
 - Form actions include `submit()`.
 
 Prefer robust selectors in this order: role and accessible name, label/placeholder/test id, then CSS selector. Use `find_optional()` when a conditional banner, modal, or toast may or may not appear.
+
+For frameworks that render custom complex elements, it may be fine to use direct Playwright locators. Wrap them with `r.element(locator)` when you still want recorder-provided controls.
 
 ## Public API
 
@@ -285,8 +296,10 @@ class DemoVideoRecorder(
 - `synthesize_explanation_audio_async(text: str) -> SynthesizedExplanation`
 - `synthesize_if_tts_enabled(text: str) -> str | SynthesizedExplanation`
 - `synthesize_if_tts_enabled_async(text: str) -> str | SynthesizedExplanation`
-- `prepare_cues(lines, *, async_tts=False) -> list[str | SynthesizedExplanation]`
-- `prepare_cues_async(lines) -> list[str | SynthesizedExplanation]`
+- `prepare_cues(lines: Mapping[str, str], *, async_tts=False) -> dict[str, str | SynthesizedExplanation]`
+- `prepare_cues_async(lines: Mapping[str, str]) -> dict[str, str | SynthesizedExplanation]`
+- `cue_duration_seconds(cue: str | SynthesizedExplanation) -> float`
+- `explain_during(cues: str | SynthesizedExplanation | Sequence[str | SynthesizedExplanation], action, *, tail_seconds=0.25) -> DemoVideoRecorder`
 - `wait(seconds: float) -> DemoVideoRecorder`
 - `complete_explanation() -> DemoVideoRecorder`
 - `stop_recording(*, burn=None) -> Path`
@@ -333,6 +346,8 @@ class WebUIRecorder(
     viewport=(1280, 720),
     video_backend="playwright",
     slow_mo_ms=None,
+    scroll_duration_ms=450,
+    action_pause_seconds=0.0,
     **kwargs,
 )
 ```
@@ -348,6 +363,9 @@ class WebUIRecorder(
 - `find_select(name=None, attrs=None, *, text=None, string=None, selector=None, role=None, timeout_seconds=10.0, **kwargs) -> WebSelectElement`
 - `find_all_select(name=None, attrs=None, *, text=None, string=None, selector=None, role=None, **kwargs) -> list[WebSelectElement]`
 - `wait_for_url(url, *, timeout_seconds=10.0) -> WebUIRecorder`
+- `pause(seconds=None) -> WebUIRecorder`
+- `element(locator) -> WebElement`
+- `write_clipboard_text(text: str) -> WebUIRecorder`
 - `stop_recording(*, burn=None) -> Path`
 - `close() -> None`
 
@@ -356,12 +374,14 @@ class WebElement
 ```
 
 - `highlight(*, duration_ms=700, scope="element") -> WebElement`
+- `smooth_scroll(*, duration_ms=None, block="center", inline="center") -> WebElement`
 - `wait(*, state="visible", timeout_seconds=10.0) -> WebElement`
 - `click(*, button="left", click_count=1, timeout_seconds=10.0, highlight=True) -> WebElement`
 - `double_click(*, timeout_seconds=10.0, highlight=True) -> WebElement`
 - `hover(*, timeout_seconds=10.0) -> WebElement`
 - `text(*, timeout_seconds=10.0) -> str`
 - `attribute(name, *, timeout_seconds=10.0) -> str | None`
+- `copy_text(*, timeout_seconds=10.0, highlight=True) -> str`
 - `find(...)`, `find_optional(...)`, `find_all(...)`, `find_input(...)`, `find_all_input(...)`, `find_select(...)`, and `find_all_select(...)` scoped to that element.
 
 ```python

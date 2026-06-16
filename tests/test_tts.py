@@ -171,6 +171,12 @@ def test_prepare_cues_uses_recorder_sync_preparation(tmp_path) -> None:
         "First cue",
         "Second cue",
     ]
+    assert recorder.prepare_cues(
+        {"intro": "  First cue  ", "finish": "Second cue"}
+    ) == {
+        "intro": "First cue",
+        "finish": "Second cue",
+    }
 
 
 def test_prepare_cues_async_uses_recorder_async_preparation(tmp_path) -> None:
@@ -201,6 +207,21 @@ def test_prepare_cues_async_uses_recorder_async_preparation(tmp_path) -> None:
         ),
     ]
 
+    named_result = asyncio.run(
+        recorder.prepare_cues_async({"intro": "First cue", "finish": "Second cue"})
+    )
+
+    assert named_result == {
+        "intro": SynthesizedExplanation(
+            "First cue",
+            SynthesizedAudio(tmp_path / "tts" / "First cue.mp3", 1.0),
+        ),
+        "finish": SynthesizedExplanation(
+            "Second cue",
+            SynthesizedAudio(tmp_path / "tts" / "Second cue.mp3", 1.0),
+        ),
+    }
+
 
 def test_prepare_cues_can_run_async_preparation_from_sync_code(tmp_path) -> None:
     class FakeTTS(TTSBackend):
@@ -225,6 +246,50 @@ def test_prepare_cues_can_run_async_preparation_from_sync_code(tmp_path) -> None
             SynthesizedAudio(tmp_path / "tts" / "First cue.mp3", 1.0),
         ),
     ]
+
+
+def test_explain_during_runs_action_and_waits_out_cue(tmp_path, monkeypatch) -> None:
+    recorder = DemoVideoRecorder(tmp_path / "demo.mp4", min_pause_seconds=2.0)
+    waits: list[float] = []
+    actions: list[str] = []
+    elapsed = {"value": 10.0}
+
+    monkeypatch.setattr(recorder.subtitles, "elapsed_seconds", lambda: elapsed["value"])
+    monkeypatch.setattr(recorder, "wait", lambda seconds: waits.append(seconds) or recorder)
+
+    def action() -> None:
+        actions.append("ran")
+        elapsed["value"] = 10.75
+
+    recorder.explain_during("Short cue", action, tail_seconds=0.25)
+
+    assert actions == ["ran"]
+    assert waits == [1.5]
+
+
+def test_explain_during_accepts_multiple_cues(tmp_path, monkeypatch) -> None:
+    recorder = DemoVideoRecorder(tmp_path / "demo.mp4", min_pause_seconds=1.0)
+    explained: list[tuple[str, bool]] = []
+    completed = 0
+
+    def fake_explain(text, *, wait=True):
+        explained.append((str(text), wait))
+        return recorder
+
+    monkeypatch.setattr(recorder, "explain", fake_explain)
+    monkeypatch.setattr(recorder, "wait", lambda seconds: recorder)
+
+    def fake_complete() -> DemoVideoRecorder:
+        nonlocal completed
+        completed += 1
+        return recorder
+
+    monkeypatch.setattr(recorder, "complete_explanation", fake_complete)
+
+    recorder.explain_during(["First cue", "Second cue"], lambda: None)
+
+    assert explained == [("First cue", False), ("Second cue", True)]
+    assert completed == 2
 
 
 def test_edge_tts_cache_reuses_existing_clip(tmp_path, monkeypatch) -> None:

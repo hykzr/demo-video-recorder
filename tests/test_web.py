@@ -9,6 +9,7 @@ import pytest
 from demo_video_recorder.backends import PlaywrightVideoCaptureBackend
 from demo_video_recorder.errors import RecordingError
 from demo_video_recorder.web import (
+    WebElement,
     WebInputElement,
     WebSelectElement,
     WebUIRecorder,
@@ -54,6 +55,14 @@ class FakeLocator:
     def wait_for(self, *, state: str, timeout: float) -> None:
         self.wait_state = state
         self.wait_timeout = timeout
+
+    def inner_text(self, *, timeout: float) -> str:
+        del timeout
+        return self.value
+
+    def get_attribute(self, name: str, *, timeout: float) -> str | None:
+        del name, timeout
+        return None
 
     def evaluate(self, script: str, *args: object) -> str | None:
         self.evaluate_calls.append((script, args[0] if args else None))
@@ -523,11 +532,39 @@ def test_webui_recorder_uses_playwright_video_backend_by_default(tmp_path) -> No
         tmp_path / "demo.mp4",
         typed_character_delay=0.025,
         command_lead_seconds=1.0,
+        scroll_duration_ms=620,
+        action_pause_seconds=0.125,
     )
 
     assert isinstance(recorder.capture, PlaywrightVideoCaptureBackend)
     assert recorder.typed_character_delay == 0.025
     assert recorder.command_lead_seconds == 1.0
+    assert recorder.scroll_duration_ms == 620
+    assert recorder.action_pause_seconds == 0.125
+
+
+def test_web_actions_use_recorder_pause_when_configured(tmp_path) -> None:
+    recorder = WebUIRecorder(tmp_path / "demo.mp4", action_pause_seconds=0.25)
+    waits: list[float] = []
+    recorder.wait = lambda seconds: waits.append(seconds) or recorder  # type: ignore[method-assign]
+
+    WebInputElement(recorder, FakeLocator("input")).fill("hello", highlight=False)
+    WebElement(recorder, FakeLocator("button", tag="button")).click(highlight=False)
+
+    assert waits == [0.25, 0.25]
+
+
+def test_web_element_copy_text_writes_clipboard_without_page_selection(tmp_path) -> None:
+    recorder = WebUIRecorder(tmp_path / "demo.mp4")
+    copied: list[str] = []
+    recorder.write_clipboard_text = lambda text: copied.append(text) or recorder  # type: ignore[method-assign]
+    locator = FakeLocator("code", tag="code", value="1 1\n1 2\n1 3")
+    element = WebElement(recorder, locator)
+
+    assert element.copy_text(highlight=False) == "1 1\n1 2\n1 3"
+
+    assert copied == ["1 1\n1 2\n1 3"]
+    assert locator.pressed_keys == []
 
 
 def test_webui_recorder_serves_static_folder(tmp_path) -> None:

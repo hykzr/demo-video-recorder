@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 import asyncio
 from pathlib import Path
 import shutil
 import platform
 import subprocess
 import time
-from typing import Mapping, Sequence
+from typing import Callable, Sequence, overload
 
 from demo_video_recorder.backends import FfmpegCaptureBackend
 from demo_video_recorder.defaults import DEFAULTS
@@ -282,11 +282,14 @@ class DemoVideoRecorder:
 
     def prepare_cues(
         self,
-        lines: Iterable[str],
+        lines: Mapping[str, str],
         *,
         async_tts: bool = False,
-    ) -> list[PreparedCue]:
+    ) -> dict[str, PreparedCue]:
         """Prepare multiple narration cues before recording starts.
+
+        Prefer passing a named mapping such as ``{"intro": "..."}``; named
+        cues are much easier to maintain than long positional lists.
 
         With ``async_tts=False`` this prepares cues one at a time. With
         ``async_tts=True`` it runs the async variant concurrently with
@@ -294,21 +297,93 @@ class DemoVideoRecorder:
         ``await recorder.prepare_cues_async(...)`` instead.
         """
 
-        if async_tts:
-            return asyncio.run(self.prepare_cues_async(lines))
-        return [self.synthesize_if_tts_enabled(line) for line in lines]
+        return {
+            name: self.synthesize_if_tts_enabled(line) for name, line in lines.items()
+        }
 
     async def prepare_cues_async(
         self,
-        lines: Iterable[str],
-    ) -> list[PreparedCue]:
+        lines: Mapping[str, str],
+    ) -> dict[str, PreparedCue]:
         """Prepare multiple narration cues concurrently before recording starts."""
 
-        return list(
-            await asyncio.gather(
-                *(self.synthesize_if_tts_enabled_async(line) for line in lines)
-            )
+        names = list(lines)
+        prepared = await asyncio.gather(
+            *(self.synthesize_if_tts_enabled_async(lines[name]) for name in names)
         )
+        return dict(zip(names, prepared))
+
+    def cue_duration_seconds(self, cue: PreparedCue) -> float:
+        """Return the display/audio duration for a prepared narration cue."""
+
+        if isinstance(cue, SynthesizedExplanation):
+            return cue.audio.duration_seconds
+        return self.subtitles.read_delay_seconds(cue)
+
+    @overload
+    def explain_during(
+        self,
+        cues: PreparedCue,
+        action: Callable[[], None],
+        *,
+        tail_seconds: float = 0.25,
+    ) -> "DemoVideoRecorder": ...
+
+    @overload
+    def explain_during(
+        self,
+        cues: Sequence[PreparedCue],
+        action: Callable[[], None],
+        *,
+        tail_seconds: float = 0.25,
+    ) -> "DemoVideoRecorder": ...
+
+    def explain_during(
+        self,
+        cues: PreparedCue | Sequence[PreparedCue],
+        action: Callable[[], None],
+        *,
+        tail_seconds: float = 0.25,
+    ) -> "DemoVideoRecorder":
+        """Run an action while one or more prepared cues are narrated.
+
+        The first cue starts before ``action`` and the recorder waits out the
+        remaining cue duration before moving on. Extra cues, if provided, are
+        displayed afterward so the next visible action cannot race ahead.
+        """
+
+        cue_list: list[PreparedCue]
+        if isinstance(cues, (str, SynthesizedExplanation)):
+            cue_list = [cues]
+        else:
+            cue_list = list(cues)
+
+        if not cue_list:
+            action()
+            return self
+
+        first = cue_list[0]
+        started_at = self.subtitles.elapsed_seconds()
+        self.explain(first, wait=False)
+        try:
+            action()
+        except Exception:
+            self.complete_explanation()
+            raise
+
+        remaining = self.cue_duration_seconds(first) - (
+            self.subtitles.elapsed_seconds() - started_at
+        )
+        if remaining > 0:
+            self.wait(remaining + tail_seconds)
+        elif tail_seconds > 0:
+            self.wait(tail_seconds)
+        self.complete_explanation()
+
+        for cue in cue_list[1:]:
+            self.explain(cue)
+            self.complete_explanation()
+        return self
 
     def wait(self, seconds: float) -> "DemoVideoRecorder":
         time.sleep(seconds)

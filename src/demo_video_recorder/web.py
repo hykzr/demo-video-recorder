@@ -46,9 +46,14 @@ class WebElement:
         self,
         *,
         duration_ms: int = 700,
-        scroll_duration_ms: int = 450,
+        scroll_duration_ms: int | None = None,
         scope: Literal["element", "field"] = "element",
     ) -> "WebElement":
+        resolved_scroll_duration_ms = (
+            self.recorder.scroll_duration_ms
+            if scroll_duration_ms is None
+            else scroll_duration_ms
+        )
         self.locator.evaluate(
             """
             async (element, args) => {
@@ -133,8 +138,108 @@ class WebElement:
             """,
             {
                 "duration": duration_ms,
-                "scrollDuration": scroll_duration_ms,
+                "scrollDuration": resolved_scroll_duration_ms,
                 "scope": scope,
+            },
+        )
+        return self
+
+    def smooth_scroll(
+        self,
+        *,
+        duration_ms: int | None = None,
+        block: Literal["start", "center", "end", "nearest"] = "center",
+        inline: Literal["start", "center", "end", "nearest"] = "center",
+    ) -> "WebElement":
+        """Smooth-scroll this element into view without highlighting it."""
+
+        resolved_duration_ms = (
+            self.recorder.scroll_duration_ms
+            if duration_ms is None
+            else duration_ms
+        )
+        self.locator.evaluate(
+            """
+            async (element, args) => {
+                const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+                const target = element;
+                const rect = target.getBoundingClientRect();
+                const startX = window.scrollX;
+                const startY = window.scrollY;
+                const maxX = Math.max(
+                    0,
+                    document.documentElement.scrollWidth - window.innerWidth,
+                );
+                const maxY = Math.max(
+                    0,
+                    document.documentElement.scrollHeight - window.innerHeight,
+                );
+
+                const targetX = () => {
+                    if (args.inline === 'start') {
+                        return startX + rect.left;
+                    }
+                    if (args.inline === 'end') {
+                        return startX + rect.right - window.innerWidth;
+                    }
+                    if (args.inline === 'nearest') {
+                        if (rect.left >= 0 && rect.right <= window.innerWidth) {
+                            return startX;
+                        }
+                        return startX + rect.left;
+                    }
+                    return startX + rect.left - ((window.innerWidth - rect.width) / 2);
+                };
+
+                const targetY = () => {
+                    if (args.block === 'start') {
+                        return startY + rect.top;
+                    }
+                    if (args.block === 'end') {
+                        return startY + rect.bottom - window.innerHeight;
+                    }
+                    if (args.block === 'nearest') {
+                        if (rect.top >= 0 && rect.bottom <= window.innerHeight) {
+                            return startY;
+                        }
+                        return startY + rect.top;
+                    }
+                    return startY + rect.top - ((window.innerHeight - rect.height) / 2);
+                };
+
+                const endX = Math.min(Math.max(targetX(), 0), maxX);
+                const endY = Math.min(Math.max(targetY(), 0), maxY);
+                const duration = Math.max(0, Number(args.duration) || 0);
+                if (duration <= 0 || (Math.abs(endX - startX) < 1 && Math.abs(endY - startY) < 1)) {
+                    window.scrollTo(endX, endY);
+                    return;
+                }
+
+                const startedAt = performance.now();
+                const ease = progress => 1 - Math.pow(1 - progress, 3);
+                await new Promise(resolve => {
+                    const step = now => {
+                        const progress = Math.min((now - startedAt) / duration, 1);
+                        const eased = ease(progress);
+                        window.scrollTo(
+                            startX + ((endX - startX) * eased),
+                            startY + ((endY - startY) * eased),
+                        );
+                        if (progress < 1) {
+                            requestAnimationFrame(step);
+                        } else {
+                            resolve();
+                        }
+                    };
+                    requestAnimationFrame(step);
+                });
+                await wait(20);
+            }
+            """,
+            {
+                "duration": resolved_duration_ms,
+                "block": block,
+                "inline": inline,
             },
         )
         return self
@@ -163,6 +268,7 @@ class WebElement:
             click_count=click_count,
             timeout=timeout_seconds * 1000,
         )
+        self._pause_after_action()
         return self
 
     def double_click(
@@ -174,10 +280,13 @@ class WebElement:
         if highlight:
             self.highlight()
         self.locator.dblclick(timeout=timeout_seconds * 1000)
+        self._pause_after_action()
         return self
 
     def hover(self, *, timeout_seconds: float = 10.0) -> "WebElement":
+        self.smooth_scroll()
         self.locator.hover(timeout=timeout_seconds * 1000)
+        self._pause_after_action()
         return self
 
     def text(self, *, timeout_seconds: float = 10.0) -> str:
@@ -185,6 +294,24 @@ class WebElement:
 
     def attribute(self, name: str, *, timeout_seconds: float = 10.0) -> str | None:
         return self.locator.get_attribute(name, timeout=timeout_seconds * 1000)
+
+    def copy_text(
+        self,
+        *,
+        timeout_seconds: float = 10.0,
+        highlight: bool = True,
+    ) -> str:
+        """Copy this element's text to the clipboard without selecting the page."""
+
+        if highlight:
+            self.highlight()
+        text = self.text(timeout_seconds=timeout_seconds)
+        self.recorder.write_clipboard_text(text)
+        self._pause_after_action()
+        return text
+
+    def _pause_after_action(self, seconds: float | None = None) -> None:
+        self.recorder.pause(seconds)
 
     def find(
         self,
@@ -368,8 +495,10 @@ class WebInputElement(WebElement):
                 delay=self.recorder.typed_character_delay * 1000,
                 timeout=timeout_seconds * 1000,
             )
+            self._pause_after_action()
             return self
         self.locator.fill(value, timeout=timeout_seconds * 1000)
+        self._pause_after_action()
         return self
 
     def type(
@@ -383,6 +512,7 @@ class WebInputElement(WebElement):
         if highlight:
             self.highlight()
         self.locator.type(text, delay=delay_ms, timeout=timeout_seconds * 1000)
+        self._pause_after_action()
         return self
 
     def clear(
@@ -394,6 +524,7 @@ class WebInputElement(WebElement):
         if highlight:
             self.highlight()
         self.locator.clear(timeout=timeout_seconds * 1000)
+        self._pause_after_action()
         return self
 
     def edit_text(
@@ -460,6 +591,7 @@ class WebInputElement(WebElement):
             finally:
                 self._restore_input_type(restore_type)
             running_length += len(replacement) - (end - start)
+        self._pause_after_action()
         return self
 
     def _replace_from_end(
@@ -512,6 +644,7 @@ class WebInputElement(WebElement):
             )
         finally:
             self._restore_input_type(restore_type)
+        self._pause_after_action()
         return self
 
     def select_text(
@@ -540,6 +673,7 @@ class WebInputElement(WebElement):
         )
 
         if drag and resolved_start != resolved_end:
+            self.smooth_scroll()
             points = self.locator.evaluate(
                 """
                 (element, args) => {
@@ -640,6 +774,7 @@ class WebInputElement(WebElement):
             """,
             {"start": resolved_start, "end": resolved_end},
         )
+        self._pause_after_action()
         return self
 
     def select_all(
@@ -652,6 +787,7 @@ class WebInputElement(WebElement):
             self.highlight()
         self.locator.click(timeout=timeout_seconds * 1000)
         self.locator.press("ControlOrMeta+A", timeout=timeout_seconds * 1000)
+        self._pause_after_action()
         return self
 
     def clear_selection(
@@ -662,16 +798,19 @@ class WebInputElement(WebElement):
     ) -> "WebInputElement":
         self.locator.evaluate("element => element.focus()")
         self.locator.press(key, timeout=timeout_seconds * 1000)
+        self._pause_after_action()
         return self
 
     def copy(self, *, timeout_seconds: float = 10.0) -> "WebInputElement":
         self.locator.evaluate("element => element.focus()")
         self.locator.press("ControlOrMeta+C", timeout=timeout_seconds * 1000)
+        self._pause_after_action()
         return self
 
     def cut(self, *, timeout_seconds: float = 10.0) -> "WebInputElement":
         self.locator.evaluate("element => element.focus()")
         self.locator.press("ControlOrMeta+X", timeout=timeout_seconds * 1000)
+        self._pause_after_action()
         return self
 
     def paste(
@@ -684,6 +823,7 @@ class WebInputElement(WebElement):
         if text is not None:
             self._write_clipboard_text(text)
         self.locator.press("ControlOrMeta+V", timeout=timeout_seconds * 1000)
+        self._pause_after_action()
         return self
 
     def select_clear(
@@ -791,6 +931,7 @@ class WebInputElement(WebElement):
             """,
             {"value": value, "duration": duration_ms},
         )
+        self._pause_after_action()
         return self
 
     @staticmethod
@@ -934,23 +1075,7 @@ class WebInputElement(WebElement):
         return resolved_start, resolved_end
 
     def _write_clipboard_text(self, text: str) -> None:
-        page = self.recorder.current_page
-        parsed = urlparse(page.url)
-        if parsed.scheme and parsed.netloc:
-            origin = f"{parsed.scheme}://{parsed.netloc}"
-            try:
-                page.context.grant_permissions(
-                    ["clipboard-read", "clipboard-write"],
-                    origin=origin,
-                )
-            except Exception:
-                pass
-        try:
-            page.evaluate("text => navigator.clipboard.writeText(text)", text)
-        except Exception as exc:
-            raise RecordingError(
-                "Could not write text to the browser clipboard."
-            ) from exc
+        self.recorder.write_clipboard_text(text)
 
     def set_range(
         self,
@@ -1207,10 +1332,12 @@ class WebInputElement(WebElement):
         else:
             resolved = [str(path) for path in files]
         self.locator.set_input_files(resolved, timeout=timeout_seconds * 1000)
+        self._pause_after_action()
         return self
 
     def press(self, key: str, *, timeout_seconds: float = 10.0) -> "WebInputElement":
         self.locator.press(key, timeout=timeout_seconds * 1000)
+        self._pause_after_action()
         return self
 
     def check(
@@ -1222,6 +1349,7 @@ class WebInputElement(WebElement):
         if highlight:
             self.highlight(scope="field")
         self.locator.check(timeout=timeout_seconds * 1000)
+        self._pause_after_action()
         return self
 
     def uncheck(
@@ -1233,6 +1361,7 @@ class WebInputElement(WebElement):
         if highlight:
             self.highlight(scope="field")
         self.locator.uncheck(timeout=timeout_seconds * 1000)
+        self._pause_after_action()
         return self
 
     def select_option(
@@ -1252,6 +1381,7 @@ class WebInputElement(WebElement):
             index=index,
             timeout=timeout_seconds * 1000,
         )
+        self._pause_after_action()
         return self
 
 
@@ -1276,6 +1406,7 @@ class WebSelectElement(WebInputElement):
             index=index,
             timeout=timeout_seconds * 1000,
         )
+        self._pause_after_action()
         return self
 
     def _show_options(
@@ -1381,6 +1512,7 @@ class WebFormElement(WebElement):
                 }
             }
             """)
+        self._pause_after_action()
         return self
 
 
@@ -1396,6 +1528,8 @@ class WebUIRecorder(DemoVideoRecorder):
         viewport: tuple[int, int] = (1280, 720),
         video_backend: WebVideoBackend = "playwright",
         slow_mo_ms: float | None = None,
+        scroll_duration_ms: int = 450,
+        action_pause_seconds: float = 0.0,
         **kwargs: object,
     ) -> None:
         self.typed_character_delay = float(
@@ -1410,6 +1544,8 @@ class WebUIRecorder(DemoVideoRecorder):
         self.viewport = viewport
         self.video_backend = video_backend
         self.slow_mo_ms = slow_mo_ms
+        self.scroll_duration_ms = scroll_duration_ms
+        self.action_pause_seconds = action_pause_seconds
         if video_backend == "playwright":
             self.capture = PlaywrightVideoCaptureBackend(
                 self.raw_video_path,
@@ -1665,6 +1801,41 @@ class WebUIRecorder(DemoVideoRecorder):
         timeout_seconds: float = 10.0,
     ) -> "WebUIRecorder":
         self.current_page.wait_for_url(url, timeout=timeout_seconds * 1000)
+        return self
+
+    def pause(self, seconds: float | None = None) -> "WebUIRecorder":
+        """Pause between visible browser actions."""
+
+        resolved_seconds = self.action_pause_seconds if seconds is None else seconds
+        if resolved_seconds > 0:
+            self.wait(resolved_seconds)
+        return self
+
+    def element(self, locator: Locator) -> WebElement:
+        """Wrap a Playwright locator so custom selectors still use recorder actions."""
+
+        return self._wrap_element(locator.first)
+
+    def write_clipboard_text(self, text: str) -> "WebUIRecorder":
+        """Write browser clipboard text without selecting any page content."""
+
+        page = self.current_page
+        parsed = urlparse(page.url)
+        if parsed.scheme and parsed.netloc:
+            origin = f"{parsed.scheme}://{parsed.netloc}"
+            try:
+                page.context.grant_permissions(
+                    ["clipboard-read", "clipboard-write"],
+                    origin=origin,
+                )
+            except Exception:
+                pass
+        try:
+            page.evaluate("text => navigator.clipboard.writeText(text)", text)
+        except Exception as exc:
+            raise RecordingError(
+                "Could not write text to the browser clipboard."
+            ) from exc
         return self
 
     def stop_recording(self, *, burn: bool | None = None) -> Path:

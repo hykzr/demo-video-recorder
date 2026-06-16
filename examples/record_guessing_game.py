@@ -270,22 +270,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     final_path: Path | None = None
 
-    (
-        intro_msg,
-        first_run_msg,
-        new_run_msg,
-        subsequent_run_msg,
-        same_number_msg,
-        conclusion_msg,
-    ) = recorder.prepare_cues(
-        [
-            "I'm going to demonstrate the CLI guessing game.",
-            "First run. I'll open the game and start guessing.",
-            "Now I'll reopen it to prove each run picks randomly.",
-            "Let's try the game again.",
-            "It rolled the same number again. Unlikely, but possible.",
-            "This demo reacts to real app output and narrates each step.",
-        ],
+    cues = recorder.prepare_cues(
+        {
+            "intro": "I'm going to demonstrate the CLI guessing game.",
+            "first_run": "First run. I'll open the game and start guessing.",
+            "new_run": "Now I'll reopen it to prove each run picks randomly.",
+            "subsequent_run": "Let's try the game again.",
+            "same_number": "It rolled the same number again. Unlikely, but possible.",
+            "conclusion": "This demo reacts to real app output and narrates each step.",
+        },
         async_tts=args.async_tts,
     )
 
@@ -301,17 +294,17 @@ def main(argv: list[str] | None = None) -> int:
                 check_access=args.check_access and not args.no_record,
             )
 
-        recorder.explain(intro_msg)
+        recorder.explain(cues["intro"])
         first_answer = play_one_game(
             recorder,
-            launch_message=first_run_msg,
+            launch_message=cues["first_run"],
         )
 
-        recorder.explain(new_run_msg)
+        recorder.explain(cues["new_run"])
         for attempt in range(1, args.max_reopen_attempts + 1):
             second_answer = play_one_game(
                 recorder,
-                launch_message=subsequent_run_msg,
+                launch_message=cues["subsequent_run"],
             )
             if second_answer != first_answer:
                 recorder.explain(
@@ -319,12 +312,12 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 break
 
-            recorder.explain(same_number_msg)
+            recorder.explain(cues["same_number"])
         else:
             raise ProcessError(
                 f"The game repeated {first_answer} for {args.max_reopen_attempts} reopen attempts."
             )
-        recorder.explain(conclusion_msg)
+        recorder.explain(cues["conclusion"])
 
         if audio_only:
             final_path = recorder.render_narration_audio(output_path)

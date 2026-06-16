@@ -136,7 +136,9 @@ Useful Web UI helpers:
 - `find_optional(...)`: returns `None` instead of raising when an element is absent.
 - `find_input(...)`: finds `input` and `textarea` controls.
 - `find_select(...)`: finds `select` controls.
-- Element methods include `highlight()`, `click()`, `double_click()`, `hover()`, `wait()`, `text()`, and `attribute()`.
+- Element methods include `highlight()`, `smooth_scroll()`, `click()`, `double_click()`, `hover()`, `wait()`, `text()`, `attribute()`, and `copy_text()`.
+- Use `WebUIRecorder(..., scroll_duration_ms=600, action_pause_seconds=0.25)` to control smooth-scroll speed and add a natural pause after visible browser actions.
+- `element.copy_text()` copies text from a non-input element, such as a `code` block, without selecting the whole page.
 - Input methods include `fill()`, `type()`, `clear()`, `edit_text()`, `select_text()`, `select_all()`, `clear_selection()`, `copy()`, `cut()`, `paste()`, `select_clear()`, `select_paste()`, `select_clear_paste()`, `set_range()`, `set_date()`, `set_color()`, `set_files()`, `press()`, `check()`, `uncheck()`, and `select_option()`.
 - Use `edit_text()` when you want a correction to look human: it finds the smallest text changes, presses Backspace for removed characters, then types inserted text. Use `select_text(...)` for visible mouse-drag selection, or `select_clear_paste(0.5)` for clipboard-style demos with pauses between selection, clearing, and pasting.
 
@@ -202,12 +204,27 @@ prepared = r.synthesize_if_tts_enabled(
 r.explain(prepared)
 ```
 
-For several known cues, prepare them on the recorder instead of retyping async glue:
+For several known cues, prepare named cues on the recorder instead of retyping async glue. Named cues are much easier to maintain than long positional lists, especially when a demo is revised:
 
 ```python
-intro, finish = r.prepare_cues(
-    ["The app is open.", "The result is now visible."],
+cues = r.prepare_cues(
+    {
+        "intro": "The app is open.",
+        "finish": "The result is now visible.",
+    },
     async_tts=True,
+)
+r.explain(cues["intro"])
+```
+
+Avoid large cue lists that are unpacked by position. They are easy to misalign after adding, deleting, or moving one clip.
+
+When an action should happen while narration is playing, use `explain_during()`:
+
+```python
+r.explain_during(
+    cues["finish"],
+    lambda: r.find("main", text="Done").highlight(),
 )
 ```
 
