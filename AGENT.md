@@ -126,7 +126,7 @@ cues = recorder.prepare_cues(
 recorder.explain(cues["intro"])
 ```
 
-Strongly avoid large positional cue lists. They are hard for both humans and agents to maintain, and one inserted cue can shift every later action. Use a `dict[str, str]` and refer to cues by name.
+Do not pass positional cue lists to `prepare_cues()`. They are unsupported because they are hard for both humans and agents to maintain, and one inserted cue can shift every later action. Use a `dict[str, str]` and refer to cues by name.
 
 If Edge TTS fails, read the full exception. The backend reports speaker, speed, volume, text length, output path, and the original error type/message. First check whether the issue is a bad voice/parameter, missing network access, or a transient service failure. Only switch to `NativeTTSBackend`, `MacOSTTSBackend`, or `WindowsTTSBackend` after the Edge issue is clearly unfixable for the recording run.
 
@@ -218,11 +218,16 @@ def main():
 Use `WebUIRecorder` for browser demos. It defaults to Playwright's built-in page video recorder, so it works well in headless mode and does not need macOS Screen Recording permission unless you explicitly choose `video_backend="ffmpeg"`.
 
 ```python
-from demo_video_recorder import WebUIRecorder
+from demo_video_recorder import SubtitleStyle, WebUIRecorder
 
 
 def main():
-    r = WebUIRecorder("out/web-demo.mp4", headless=True, viewport=(1280, 720))
+    r = WebUIRecorder(
+        "out/web-demo.mp4",
+        headless=True,
+        viewport=(1280, 720),
+        subtitle_style=SubtitleStyle(font_size=12, alignment="bottom_center"),
+    )
     try:
         r.serve("dist", 8000)
         r.open_web("/")
@@ -246,10 +251,10 @@ Useful helpers:
 - `find_all(...)` returns all matched elements.
 - `find_input(...)` and `find_all_input(...)` restrict lookup to `input` and `textarea` controls.
 - `find_select(...)` and `find_all_select(...)` restrict lookup to `select` controls.
-- Element actions include `highlight()`, `smooth_scroll()`, `click()`, `double_click()`, `hover()`, `wait()`, `text()`, `attribute()`, and `copy_text()`. Highlights smooth-scroll the target into view.
+- Element actions include `highlight()`, `smooth_scroll()`, `click()`, `double_click()`, `hover()`, `wait()`, `text()`, `attribute()`, and `copy_text()`. Highlights smooth-scroll the target through nested scroll containers into view.
 - Highlight non-interactive results after actions too: status text, generated answers, charts, tables, metrics, toasts, and result panels.
 - Input/control actions include `fill()`, `type()`, `clear()`, `edit_text()`, `select_text()`, `select_all()`, `clear_selection()`, `copy()`, `cut()`, `paste()`, `select_clear()`, `select_paste()`, `select_clear_paste()`, `set_value()`, `set_range()`, `set_date()`, `set_color()`, `set_files()`, `press()`, `check()`, `uncheck()`, and `select_option()`.
-- Use `edit_text()` for visible correction flows where only the smallest changed spans are removed with Backspace and retyped. Use `select_text(...)` for mouse-drag text selection and `select_clear_paste(0.5)` for clipboard-style input demos that need visible pauses between selection, clearing, and pasting.
+- Use `edit_text()` for visible correction flows where only the smallest changed spans are removed with Backspace and retyped. Use `select_text(...)` for mouse-drag text selection and `select_clear_paste(0.5, "replacement text")` for clipboard-style input demos that need visible pauses between selection, clearing, and pasting.
 - Use `copy_text()` for non-editable displayed text such as code blocks. Do not click a code block and press `ControlOrMeta+A`, because that can select the whole page in the recording.
 - Prefer the specific visual actions for native controls: `select_option()` shows the current option and then highlights the target option, `set_date()` steps through year/month/day panels before applying the date, `set_color()` shows the current swatch before highlighting the target swatch, `set_range()` animates movement, and radio/checkbox checks highlight the containing field.
 - Form actions include `submit()`.
@@ -281,10 +286,13 @@ class DemoVideoRecorder(
     ffmpeg="ffmpeg",
     ffprobe="ffprobe",
     draw_mouse=False,
+    subtitle_style=None,
     tts=None,
     narration_audio_path=None,
 )
 ```
+
+`subtitle_style` accepts `SubtitleStyle`, a mapping of libass style keys, or a raw ffmpeg `force_style` string. Use it to set burned subtitle font, size, colors, outline, shadow, alignment, and margins.
 
 - `is_recording: bool`
 - `open_app(command, *, cwd=None, env=None, title_hint=None, wait_for_window_seconds=10.0, activate=True, capture_window=False, shell=None) -> subprocess.Popen[bytes]`
@@ -373,7 +381,7 @@ class WebUIRecorder(
 class WebElement
 ```
 
-- `highlight(*, duration_ms=700, scope="element") -> WebElement`
+- `highlight(*, duration_ms=700, scroll_duration_ms=None, scope="element") -> WebElement`
 - `smooth_scroll(*, duration_ms=None, block="center", inline="center") -> WebElement`
 - `wait(*, state="visible", timeout_seconds=10.0) -> WebElement`
 - `click(*, button="left", click_count=1, timeout_seconds=10.0, highlight=True) -> WebElement`

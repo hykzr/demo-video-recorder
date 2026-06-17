@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
+from collections.abc import Mapping
 import re
 import time
 
 from demo_video_recorder.defaults import DEFAULTS
 
-
 _TIMING_RE = re.compile(
-    r"^(?P<start>\d{2,}:\d{2}:\d{2},\d{3}) --> "
-    r"(?P<end>\d{2,}:\d{2}:\d{2},\d{3})$"
+    r"^(?P<start>\d{2,}:\d{2}:\d{2},\d{3}) --> " r"(?P<end>\d{2,}:\d{2}:\d{2},\d{3})$"
 )
 
 
@@ -56,6 +55,181 @@ class CueDisplay:
     """Timing returned for a cue that should remain on-screen."""
 
     display_until_seconds: float
+
+
+SubtitleStyleValue = str | int | float | bool
+
+_ASS_STYLE_KEYS = {
+    "font_name": "Fontname",
+    "fontname": "Fontname",
+    "font_size": "Fontsize",
+    "fontsize": "Fontsize",
+    "primary_color": "PrimaryColour",
+    "primary_colour": "PrimaryColour",
+    "primarycolour": "PrimaryColour",
+    "primarycolor": "PrimaryColour",
+    "secondary_color": "SecondaryColour",
+    "secondary_colour": "SecondaryColour",
+    "secondarycolour": "SecondaryColour",
+    "secondarycolor": "SecondaryColour",
+    "outline_color": "OutlineColour",
+    "outline_colour": "OutlineColour",
+    "outlinecolour": "OutlineColour",
+    "outlinecolor": "OutlineColour",
+    "back_color": "BackColour",
+    "back_colour": "BackColour",
+    "backcolour": "BackColour",
+    "backcolor": "BackColour",
+    "bold": "Bold",
+    "italic": "Italic",
+    "underline": "Underline",
+    "strike_out": "StrikeOut",
+    "strikeout": "StrikeOut",
+    "border_style": "BorderStyle",
+    "borderstyle": "BorderStyle",
+    "outline": "Outline",
+    "shadow": "Shadow",
+    "alignment": "Alignment",
+    "margin_left": "MarginL",
+    "marginl": "MarginL",
+    "margin_right": "MarginR",
+    "marginr": "MarginR",
+    "margin_vertical": "MarginV",
+    "marginv": "MarginV",
+}
+_ASS_COLOR_KEYS = {"PrimaryColour", "SecondaryColour", "OutlineColour", "BackColour"}
+_ASS_BOOLEAN_KEYS = {"Bold", "Italic", "Underline", "StrikeOut"}
+_ASS_ALIGNMENT_NAMES = {
+    "bottom_left": 1,
+    "bottom_center": 2,
+    "bottom_centre": 2,
+    "bottom_right": 3,
+    "middle_left": 4,
+    "middle_center": 5,
+    "middle_centre": 5,
+    "middle_right": 6,
+    "top_left": 7,
+    "top_center": 8,
+    "top_centre": 8,
+    "top_right": 9,
+}
+
+
+@dataclass(frozen=True)
+class SubtitleStyle:
+    """Style used when burning SRT subtitles through ffmpeg/libass."""
+
+    font_name: str | None = None
+    font_size: int | float | None = None
+    primary_color: str | None = None
+    secondary_color: str | None = None
+    outline_color: str | None = None
+    back_color: str | None = None
+    bold: bool | None = None
+    italic: bool | None = None
+    underline: bool | None = None
+    strike_out: bool | None = None
+    border_style: int | None = None
+    outline: int | float | None = None
+    shadow: int | float | None = None
+    alignment: int | str | None = None
+    margin_left: int | None = None
+    margin_right: int | None = None
+    margin_vertical: int | None = None
+    extra: Mapping[str, SubtitleStyleValue] = field(default_factory=dict)
+
+    def to_force_style(self) -> str:
+        """Return this style as an ffmpeg subtitles ``force_style`` value."""
+
+        values: dict[str, SubtitleStyleValue] = {}
+        for field_name in (
+            "font_name",
+            "font_size",
+            "primary_color",
+            "secondary_color",
+            "outline_color",
+            "back_color",
+            "bold",
+            "italic",
+            "underline",
+            "strike_out",
+            "border_style",
+            "outline",
+            "shadow",
+            "alignment",
+            "margin_left",
+            "margin_right",
+            "margin_vertical",
+        ):
+            value = getattr(self, field_name)
+            if value is not None:
+                values[field_name] = value
+        values.update(self.extra)
+        return _style_mapping_to_force_style(values)
+
+
+SubtitleStyleLike = SubtitleStyle | Mapping[str, SubtitleStyleValue] | str | None
+
+
+def subtitle_style_to_force_style(style: SubtitleStyleLike) -> str | None:
+    """Normalize a subtitle style value for ffmpeg's subtitles filter."""
+
+    if style is None:
+        return None
+    if isinstance(style, str):
+        trimmed = style.strip()
+        return trimmed or None
+    if isinstance(style, SubtitleStyle):
+        return style.to_force_style() or None
+    return _style_mapping_to_force_style(style) or None
+
+
+def _style_mapping_to_force_style(
+    style: Mapping[str, SubtitleStyleValue],
+) -> str:
+    parts: list[str] = []
+    for key, value in style.items():
+        if value is None:
+            continue
+        ass_key = _ass_style_key(key)
+        parts.append(f"{ass_key}={_format_ass_style_value(ass_key, value)}")
+    return ",".join(parts)
+
+
+def _ass_style_key(key: str) -> str:
+    return _ASS_STYLE_KEYS.get(key.replace("-", "_").lower(), key)
+
+
+def _format_ass_style_value(key: str, value: SubtitleStyleValue) -> str:
+    if key in _ASS_COLOR_KEYS:
+        return _format_ass_color(str(value))
+    if key in _ASS_BOOLEAN_KEYS and isinstance(value, bool):
+        return "-1" if value else "0"
+    if key == "Alignment" and isinstance(value, str):
+        return str(_ASS_ALIGNMENT_NAMES.get(value.replace("-", "_").lower(), value))
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def _format_ass_color(value: str) -> str:
+    """Convert CSS-style hex colors to ASS ``&HAABBGGRR`` colors."""
+
+    trimmed = value.strip()
+    if trimmed.upper().startswith("&H"):
+        return trimmed
+
+    hex_value = trimmed[1:] if trimmed.startswith("#") else trimmed
+    if len(hex_value) == 3:
+        hex_value = "".join(character * 2 for character in hex_value)
+    if not re.fullmatch(r"[0-9a-fA-F]{6}([0-9a-fA-F]{2})?", hex_value):
+        return trimmed
+
+    red = hex_value[0:2]
+    green = hex_value[2:4]
+    blue = hex_value[4:6]
+    alpha = hex_value[6:8] if len(hex_value) == 8 else "00"
+    return f"&H{alpha}{blue}{green}{red}".upper()
 
 
 class SubtitleWriter:
@@ -157,7 +331,9 @@ class SubtitleWriter:
         if not self.path.exists() or not self.path.read_text(encoding="utf-8").strip():
             return
 
-        blocks = re.split(r"(?:\r?\n){2,}", self.path.read_text(encoding="utf-8").strip())
+        blocks = re.split(
+            r"(?:\r?\n){2,}", self.path.read_text(encoding="utf-8").strip()
+        )
         output_lines: list[str] = []
         next_index = 1
 
@@ -191,7 +367,9 @@ class SubtitleWriter:
 
         self.path.write_text("\n".join(output_lines), encoding="utf-8")
 
-    def _append_entry(self, text: str, start_seconds: float, end_seconds: float) -> None:
+    def _append_entry(
+        self, text: str, start_seconds: float, end_seconds: float
+    ) -> None:
         lines = [
             str(self._index),
             f"{format_srt_time(start_seconds)} --> {format_srt_time(end_seconds)}",

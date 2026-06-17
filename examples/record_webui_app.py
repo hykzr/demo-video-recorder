@@ -13,11 +13,15 @@ from demo_video_recorder import (
     EdgeTTSBackend,
     FAST_SMOKE_TEST_DEFAULTS,
     NativeTTSBackend,
+    SubtitleStyle,
     WebUIRecorder,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB_APP = Path(__file__).with_name("webui_app")
+INTAKE_NOTES = (
+    "Prefers a morning call and wants a practical plan before the end of the week."
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -151,6 +155,17 @@ def main(argv: list[str] | None = None) -> int:
         action_pause_seconds=0.08 if args.fast else 0.28,
         keep_raw=False,
         keep_tts_audio=args.keep_tts_audio,
+        subtitle_style=SubtitleStyle(
+            font_name="Arial",
+            font_size=12,
+            primary_color="#ffffff",
+            outline_color="#000000",
+            border_style=1,
+            outline=0.7,
+            shadow=0,
+            alignment="bottom_center",
+            margin_vertical=20,
+        ),
         tts=tts_backend,
         **settings.recorder_kwargs(),  # type: ignore[arg-type]
     )
@@ -217,9 +232,7 @@ def main(argv: list[str] | None = None) -> int:
         recorder.explain_during(cues["preferences"], enter_preferences)
 
         def finish_submission() -> None:
-            recorder.find_input(label="Notes").fill(
-                "Prefers a morning call and wants a practical plan before the end of the week."
-            )
+            recorder.find_input(label="Notes").fill(INTAKE_NOTES)
             recorder.find_input("input", id="terms").check()
             recorder.find("button", text="Review intake details").click()
             recorder.pause(0.08 if args.fast else 0.45)
@@ -244,7 +257,7 @@ def main(argv: list[str] | None = None) -> int:
             email.select_text("maya.chen")
             email.edit_text("maya.chen+intake@example.com")
             notes = recorder.find_input(label="Notes")
-            notes.select_clear_paste(0.5 if not args.fast else 0.08)
+            notes.select_clear_paste(0.5 if not args.fast else 0.08, INTAKE_NOTES)
             recorder.find("button", text="Review intake details").click()
             recorder.pause(0.08 if args.fast else 0.45)
             recorder.find("aside", text="maya.chen+intake@example.com").highlight()

@@ -8,6 +8,7 @@ import pytest
 from demo_video_recorder.backends import FfmpegCaptureBackend
 from demo_video_recorder.backends import PlaywrightVideoCaptureBackend
 from demo_video_recorder.errors import DependencyMissingError
+from demo_video_recorder.subtitles import SubtitleStyle
 from demo_video_recorder.tts import NarrationClip
 from demo_video_recorder.types import CaptureRegion
 
@@ -102,12 +103,18 @@ def test_burn_subtitles_uses_homebrew_ffmpeg_full_when_available(
     monkeypatch.setattr(backend, "_ffmpeg_has_filter", fake_has_filter)
 
     def fake_burn(
-        *, subtitle_path, output_path, ffmpeg_binary, audio_path=None
+        *,
+        subtitle_path,
+        output_path,
+        ffmpeg_binary,
+        audio_path=None,
+        subtitle_style=None,
     ) -> None:
         called["subtitle_path"] = subtitle_path
         called["output_path"] = output_path
         called["ffmpeg_binary"] = ffmpeg_binary
         called["audio_path"] = audio_path
+        called["subtitle_style"] = subtitle_style
         output_path.write_bytes(b"final")
 
     monkeypatch.setattr(
@@ -121,6 +128,7 @@ def test_burn_subtitles_uses_homebrew_ffmpeg_full_when_available(
     assert result == output_path
     assert called["output_path"] == output_path
     assert called["ffmpeg_binary"] == "/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg"
+    assert called["subtitle_style"] is None
     assert output_path.read_bytes() == b"final"
 
 
@@ -260,6 +268,37 @@ def test_subtitles_filter_value_quotes_filename(tmp_path) -> None:
     assert value.startswith("subtitles=filename='")
     assert "\\:" in value
     assert "\\'" in value
+
+
+def test_subtitles_filter_value_includes_style(tmp_path) -> None:
+    backend = FfmpegCaptureBackend(
+        tmp_path / "demo.raw.mp4",
+        subtitle_style=SubtitleStyle(
+            font_name="Arial",
+            font_size=12,
+            primary_color="#ffffff",
+            outline_color="#000000",
+            outline=0.7,
+            shadow=0,
+            alignment="bottom_center",
+            margin_vertical=20,
+        ),
+    )
+    subtitle_path = tmp_path / "demo.srt"
+
+    value = backend._subtitles_filter_value(subtitle_path)
+
+    assert value.startswith("subtitles=filename='")
+    assert (
+        ":force_style='Fontname=Arial,"
+        "Fontsize=12,"
+        "PrimaryColour=&H00FFFFFF,"
+        "OutlineColour=&H00000000,"
+        "Outline=0.7,"
+        "Shadow=0,"
+        "Alignment=2,"
+        "MarginV=20'"
+    ) in value
 
 
 def test_playwright_video_backend_saves_page_video(tmp_path) -> None:

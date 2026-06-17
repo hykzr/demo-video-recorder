@@ -15,7 +15,12 @@ from demo_video_recorder.backends import FfmpegCaptureBackend
 from demo_video_recorder.defaults import DEFAULTS
 from demo_video_recorder.errors import RecordingError
 from demo_video_recorder.macos import check_screen_recording_access
-from demo_video_recorder.subtitles import CueDisplay, SubtitleWriter
+from demo_video_recorder.subtitles import (
+    CueDisplay,
+    SubtitleStyleLike,
+    SubtitleWriter,
+    subtitle_style_to_force_style,
+)
 from demo_video_recorder.tts import (
     NarrationClip,
     SynthesizedExplanation,
@@ -53,6 +58,7 @@ class DemoVideoRecorder:
         ffmpeg: str = "ffmpeg",
         ffprobe: str = "ffprobe",
         draw_mouse: bool = False,
+        subtitle_style: SubtitleStyleLike = None,
         tts: TTSBackend | None = None,
         narration_audio_path: str | Path | None = None,
     ) -> None:
@@ -68,6 +74,7 @@ class DemoVideoRecorder:
             else self.output_path.with_suffix(".srt")
         )
         self.burn_subtitles_by_default = burn_subtitles
+        self.subtitle_style = subtitle_style_to_force_style(subtitle_style)
         self.keep_raw = keep_raw
         self.keep_tts_audio = keep_tts_audio
         self.subtitles = SubtitleWriter(
@@ -83,6 +90,7 @@ class DemoVideoRecorder:
             ffmpeg=ffmpeg,
             ffprobe=ffprobe,
             draw_mouse=draw_mouse,
+            subtitle_style=self.subtitle_style,
         )
         self.tts = tts
         self.narration_audio_path = (
@@ -288,14 +296,20 @@ class DemoVideoRecorder:
     ) -> dict[str, PreparedCue]:
         """Prepare multiple narration cues before recording starts.
 
-        Prefer passing a named mapping such as ``{"intro": "..."}``; named
-        cues are much easier to maintain than long positional lists.
+        Pass a named mapping such as ``{"intro": "..."}``; positional cue
+        lists are intentionally unsupported because they are easy to misalign.
 
         With ``async_tts=False`` this prepares cues one at a time. With
         ``async_tts=True`` it runs the async variant concurrently with
         ``asyncio.run()``. If called from existing async code, use
         ``await recorder.prepare_cues_async(...)`` instead.
         """
+
+        if not isinstance(lines, Mapping):
+            raise TypeError("prepare_cues() requires a mapping of cue names to text.")
+
+        if async_tts:
+            return asyncio.run(self.prepare_cues_async(lines))
 
         return {
             name: self.synthesize_if_tts_enabled(line) for name, line in lines.items()
@@ -306,6 +320,11 @@ class DemoVideoRecorder:
         lines: Mapping[str, str],
     ) -> dict[str, PreparedCue]:
         """Prepare multiple narration cues concurrently before recording starts."""
+
+        if not isinstance(lines, Mapping):
+            raise TypeError(
+                "prepare_cues_async() requires a mapping of cue names to text."
+            )
 
         names = list(lines)
         prepared = await asyncio.gather(
@@ -414,10 +433,13 @@ class DemoVideoRecorder:
         else:
             if narration_audio_path is not None:
                 self.output_path.parent.mkdir(parents=True, exist_ok=True)
+                burn_kwargs: dict[str, object] = {"audio_path": narration_audio_path}
+                if self.subtitle_style is not None:
+                    burn_kwargs["subtitle_style"] = self.subtitle_style
                 self.capture.burn_subtitles(
                     self.subtitle_path,
                     self.output_path,
-                    audio_path=narration_audio_path,
+                    **burn_kwargs,
                 )
                 final_path = self.output_path
             else:
@@ -436,10 +458,13 @@ class DemoVideoRecorder:
     def burn_subtitles(self, *, audio_path: str | Path | None = None) -> Path:
         """Burn the current SRT file into the raw recording."""
 
+        burn_kwargs: dict[str, object] = {"audio_path": audio_path}
+        if self.subtitle_style is not None:
+            burn_kwargs["subtitle_style"] = self.subtitle_style
         return self.capture.burn_subtitles(
             self.subtitle_path,
             self.output_path,
-            audio_path=audio_path,
+            **burn_kwargs,
         )
 
     def render_narration_audio(self, output_path: str | Path | None = None) -> Path:

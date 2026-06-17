@@ -19,6 +19,7 @@ from demo_video_recorder.macos import (
     ScreenRecordingAccessResult,
     check_screen_recording_access,
 )
+from demo_video_recorder.subtitles import SubtitleStyle
 from demo_video_recorder.tts import (
     EdgeTTSBackend,
     MacOSTTSBackend,
@@ -57,6 +58,7 @@ __all__ = [
     "RecorderDefaults",
     "RecordingError",
     "ScreenRecordingAccessResult",
+    "SubtitleStyle",
     "SynthesizedAudio",
     "SynthesizedExplanation",
     "TTSBackend",

@@ -103,18 +103,35 @@ When `new_window=True` is used, the recorder re-runs the script in a dedicated t
 `WebUIRecorder` is built for browser demos. It defaults to Playwright's own page video recorder, which works in headless browser contexts and then passes the raw MP4 through the same subtitle and narration pipeline.
 
 ```python
-from demo_video_recorder import WebUIRecorder
+from demo_video_recorder import SubtitleStyle, WebUIRecorder
 
 
 def main():
-    r = WebUIRecorder("out/web-demo.mp4", headless=True, viewport=(1280, 720))
+    r = WebUIRecorder(
+        "out/web-demo.mp4",
+        headless=True,
+        viewport=(1280, 720),
+        subtitle_style=SubtitleStyle(
+            font_name="Arial",
+            font_size=12,
+            primary_color="#ffffff",
+            outline_color="#000000",
+            outline=0.7,
+            shadow=0,
+            alignment="bottom_center",
+            margin_vertical=20,
+        ),
+    )
     try:
         r.serve("dist", 8000)
         r.open_web("/")
         r.explain("The local web app is open.")
         r.find_input(label="Email address").fill("ada@example.com")
         r.find_select(label="Plan").select_option(label="Pro")
-        r.find_input(label="Notes").select_clear_paste(0.5)
+        r.find_input(label="Notes").select_clear_paste(
+            0.5,
+            "Interested in the Pro plan.",
+        )
         r.find(role="button", name="Continue").click()
         r.find("main", text="Welcome").highlight()
         r.explain("The workflow is complete and the confirmation is visible.")
@@ -137,10 +154,10 @@ Useful Web UI helpers:
 - `find_input(...)`: finds `input` and `textarea` controls.
 - `find_select(...)`: finds `select` controls.
 - Element methods include `highlight()`, `smooth_scroll()`, `click()`, `double_click()`, `hover()`, `wait()`, `text()`, `attribute()`, and `copy_text()`.
-- Use `WebUIRecorder(..., scroll_duration_ms=600, action_pause_seconds=0.25)` to control smooth-scroll speed and add a natural pause after visible browser actions.
+- Use `WebUIRecorder(..., scroll_duration_ms=600, action_pause_seconds=0.25)` to control smooth-scroll speed and add a natural pause after visible browser actions. Scrolling works through nested scroll containers, which is useful for app shells such as Streamlit.
 - `element.copy_text()` copies text from a non-input element, such as a `code` block, without selecting the whole page.
 - Input methods include `fill()`, `type()`, `clear()`, `edit_text()`, `select_text()`, `select_all()`, `clear_selection()`, `copy()`, `cut()`, `paste()`, `select_clear()`, `select_paste()`, `select_clear_paste()`, `set_range()`, `set_date()`, `set_color()`, `set_files()`, `press()`, `check()`, `uncheck()`, and `select_option()`.
-- Use `edit_text()` when you want a correction to look human: it finds the smallest text changes, presses Backspace for removed characters, then types inserted text. Use `select_text(...)` for visible mouse-drag selection, or `select_clear_paste(0.5)` for clipboard-style demos with pauses between selection, clearing, and pasting.
+- Use `edit_text()` when you want a correction to look human: it finds the smallest text changes, presses Backspace for removed characters, then types inserted text. Use `select_text(...)` for visible mouse-drag selection, or `select_clear_paste(0.5, "replacement text")` for clipboard-style demos with pauses between selection, clearing, and pasting.
 
 `find()` accepts Beautiful Soup style names and attrs plus Playwright-friendly selectors:
 
@@ -204,7 +221,7 @@ prepared = r.synthesize_if_tts_enabled(
 r.explain(prepared)
 ```
 
-For several known cues, prepare named cues on the recorder instead of retyping async glue. Named cues are much easier to maintain than long positional lists, especially when a demo is revised:
+For several known cues, prepare named cues on the recorder instead of retyping async glue. `prepare_cues()` intentionally accepts a mapping, not a positional list, so revised demos do not silently shift every later cue:
 
 ```python
 cues = r.prepare_cues(
@@ -217,7 +234,7 @@ cues = r.prepare_cues(
 r.explain(cues["intro"])
 ```
 
-Avoid large cue lists that are unpacked by position. They are easy to misalign after adding, deleting, or moving one clip.
+Do not pass positional cue lists to `prepare_cues()`. Use a `dict[str, str]` and refer to cues by name.
 
 When an action should happen while narration is playing, use `explain_during()`:
 
@@ -245,6 +262,31 @@ from demo_video_recorder import NativeTTSBackend
 
 tts = NativeTTSBackend(save_dir="out/demo.tts", cache=True)
 ```
+
+## Subtitle Styling
+
+Burned subtitles use ffmpeg's `subtitles` filter. Pass `subtitle_style` to any recorder to set the libass `force_style` values used for burn-in:
+
+```python
+from demo_video_recorder import DemoVideoRecorder, SubtitleStyle
+
+r = DemoVideoRecorder(
+    "out/demo.mp4",
+    subtitle_style=SubtitleStyle(
+        font_name="Arial",
+        font_size=12,
+        primary_color="#ffffff",
+        outline_color="#000000",
+        border_style=1,
+        outline=0.7,
+        shadow=0,
+        alignment="bottom_center",
+        margin_vertical=20,
+    ),
+)
+```
+
+`SubtitleStyle` accepts CSS hex colors such as `#ffffff` and converts them to ASS colors for ffmpeg. You can also pass a mapping with Python-style keys, ASS keys, or a raw `force_style` string if you need a setting not exposed as a field.
 
 ## Defaults
 

@@ -374,6 +374,19 @@ def test_check_and_uncheck_highlight_the_containing_field(tmp_path) -> None:
     assert locator.unchecked is True
 
 
+def test_highlight_uses_scrollable_ancestor_helper(tmp_path) -> None:
+    recorder = WebUIRecorder(tmp_path / "demo.mp4")
+    locator = FakeLocator("section", tag="section")
+    element = WebElement(recorder, locator)
+
+    element.highlight(duration_ms=250, scroll_duration_ms=125)
+
+    script, args = locator.evaluate_calls[-1]
+    assert "scrollableAncestors" in script
+    assert "scrollIntoViewInContainers" in script
+    assert args == {"duration": 250, "scrollDuration": 125, "scope": "element"}
+
+
 def test_set_value_animates_range_inputs(tmp_path) -> None:
     recorder = WebUIRecorder(tmp_path / "demo.mp4")
     locator = FakeLocator("input[type=range]", tag="input")
@@ -500,7 +513,23 @@ def test_select_clear_paste_wraps_visible_steps_with_waits(tmp_path) -> None:
     assert waits == [0.5, 0.5]
     assert locator.pressed_keys == [
         "ControlOrMeta+A",
-        "ControlOrMeta+C",
+        "Backspace",
+        "ControlOrMeta+V",
+    ]
+
+
+def test_select_clear_paste_can_write_replacement_text(tmp_path) -> None:
+    recorder = WebUIRecorder(tmp_path / "demo.mp4")
+    copied: list[str] = []
+    recorder.write_clipboard_text = lambda text: copied.append(text) or recorder  # type: ignore[method-assign]
+    locator = FakeLocator("textarea", tag="textarea", value="old notes")
+    element = WebInputElement(recorder, locator)
+
+    assert element.select_clear_paste(0, "new notes", highlight=False) is element
+
+    assert copied == ["new notes"]
+    assert locator.pressed_keys == [
+        "ControlOrMeta+A",
         "Backspace",
         "ControlOrMeta+V",
     ]
@@ -554,7 +583,9 @@ def test_web_actions_use_recorder_pause_when_configured(tmp_path) -> None:
     assert waits == [0.25, 0.25]
 
 
-def test_web_element_copy_text_writes_clipboard_without_page_selection(tmp_path) -> None:
+def test_web_element_copy_text_writes_clipboard_without_page_selection(
+    tmp_path,
+) -> None:
     recorder = WebUIRecorder(tmp_path / "demo.mp4")
     copied: list[str] = []
     recorder.write_clipboard_text = lambda text: copied.append(text) or recorder  # type: ignore[method-assign]

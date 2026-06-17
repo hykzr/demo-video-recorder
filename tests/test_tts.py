@@ -11,6 +11,7 @@ from demo_video_recorder import (
     EdgeTTSBackend,
     MacOSTTSBackend,
     NativeTTSBackend,
+    SubtitleStyle,
     TTSBackend,
     WindowsTTSBackend,
 )
@@ -21,6 +22,30 @@ from demo_video_recorder.tts import (
     SynthesizedAudio,
     SynthesizedExplanation,
 )
+
+
+def test_recorder_passes_subtitle_style_to_capture(tmp_path) -> None:
+    recorder = DemoVideoRecorder(
+        tmp_path / "demo.mp4",
+        subtitle_style=SubtitleStyle(font_size=12, alignment="bottom_center"),
+    )
+    called: dict[str, object] = {}
+
+    recorder.capture.burn_subtitles = lambda subtitle_path, output_path, **kwargs: called.update(  # type: ignore[method-assign]
+        {
+            "subtitle_path": Path(subtitle_path),
+            "output_path": Path(output_path),
+            **kwargs,
+        }
+    ) or Path(
+        output_path
+    )
+
+    recorder.burn_subtitles()
+
+    assert called["subtitle_path"] == recorder.subtitle_path
+    assert called["output_path"] == recorder.output_path
+    assert called["subtitle_style"] == "Fontsize=12,Alignment=2"
 
 
 def test_tts_backend_synthesize_uses_save_audio_and_probes_duration(
@@ -167,10 +192,6 @@ def test_synthesize_if_tts_enabled_async_prepares_audio(tmp_path) -> None:
 def test_prepare_cues_uses_recorder_sync_preparation(tmp_path) -> None:
     recorder = DemoVideoRecorder(tmp_path / "demo.mp4")
 
-    assert recorder.prepare_cues(["  First cue  ", "Second cue"]) == [
-        "First cue",
-        "Second cue",
-    ]
     assert recorder.prepare_cues(
         {"intro": "  First cue  ", "finish": "Second cue"}
     ) == {
@@ -194,24 +215,11 @@ def test_prepare_cues_async_uses_recorder_async_preparation(tmp_path) -> None:
         tmp_path / "demo.mp4", tts=FakeTTS(save_dir=tmp_path / "tts")
     )
 
-    result = asyncio.run(recorder.prepare_cues_async(["First cue", "Second cue"]))
-
-    assert result == [
-        SynthesizedExplanation(
-            "First cue",
-            SynthesizedAudio(tmp_path / "tts" / "First cue.mp3", 1.0),
-        ),
-        SynthesizedExplanation(
-            "Second cue",
-            SynthesizedAudio(tmp_path / "tts" / "Second cue.mp3", 1.0),
-        ),
-    ]
-
-    named_result = asyncio.run(
+    result = asyncio.run(
         recorder.prepare_cues_async({"intro": "First cue", "finish": "Second cue"})
     )
 
-    assert named_result == {
+    assert result == {
         "intro": SynthesizedExplanation(
             "First cue",
             SynthesizedAudio(tmp_path / "tts" / "First cue.mp3", 1.0),
@@ -238,14 +246,24 @@ def test_prepare_cues_can_run_async_preparation_from_sync_code(tmp_path) -> None
         tmp_path / "demo.mp4", tts=FakeTTS(save_dir=tmp_path / "tts")
     )
 
-    result = recorder.prepare_cues(["First cue"], async_tts=True)
+    result = recorder.prepare_cues({"intro": "First cue"}, async_tts=True)
 
-    assert result == [
-        SynthesizedExplanation(
+    assert result == {
+        "intro": SynthesizedExplanation(
             "First cue",
             SynthesizedAudio(tmp_path / "tts" / "First cue.mp3", 1.0),
-        ),
-    ]
+        )
+    }
+
+
+def test_prepare_cues_rejects_positional_lists(tmp_path) -> None:
+    recorder = DemoVideoRecorder(tmp_path / "demo.mp4")
+
+    with pytest.raises(TypeError, match="mapping of cue names"):
+        recorder.prepare_cues(["First cue"])  # type: ignore[arg-type]
+
+    with pytest.raises(TypeError, match="mapping of cue names"):
+        asyncio.run(recorder.prepare_cues_async(["First cue"]))  # type: ignore[arg-type]
 
 
 def test_explain_during_runs_action_and_waits_out_cue(tmp_path, monkeypatch) -> None:
@@ -255,7 +273,9 @@ def test_explain_during_runs_action_and_waits_out_cue(tmp_path, monkeypatch) -> 
     elapsed = {"value": 10.0}
 
     monkeypatch.setattr(recorder.subtitles, "elapsed_seconds", lambda: elapsed["value"])
-    monkeypatch.setattr(recorder, "wait", lambda seconds: waits.append(seconds) or recorder)
+    monkeypatch.setattr(
+        recorder, "wait", lambda seconds: waits.append(seconds) or recorder
+    )
 
     def action() -> None:
         actions.append("ran")
@@ -302,7 +322,9 @@ def test_edge_tts_cache_reuses_existing_clip(tmp_path, monkeypatch) -> None:
         def save_sync(self, output_path: str) -> None:
             Path(output_path).write_bytes(b"mp3")
 
-    monkeypatch.setattr("demo_video_recorder.tts.shutil.which", lambda _: "/bin/ffprobe")
+    monkeypatch.setattr(
+        "demo_video_recorder.tts.shutil.which", lambda _: "/bin/ffprobe"
+    )
     monkeypatch.setattr("demo_video_recorder.tts.edge_tts.Communicate", FakeCommunicate)
     monkeypatch.setattr(
         "demo_video_recorder.tts.subprocess.run",
@@ -328,7 +350,9 @@ def test_edge_tts_failure_reports_backend_context(tmp_path, monkeypatch) -> None
         def save_sync(self, output_path: str) -> None:
             raise RuntimeError("NoAudioReceived")
 
-    monkeypatch.setattr("demo_video_recorder.tts.shutil.which", lambda _: "/bin/ffprobe")
+    monkeypatch.setattr(
+        "demo_video_recorder.tts.shutil.which", lambda _: "/bin/ffprobe"
+    )
     monkeypatch.setattr("demo_video_recorder.tts.edge_tts.Communicate", FakeCommunicate)
     tts = EdgeTTSBackend(
         save_dir=tmp_path / "tts",
@@ -350,7 +374,9 @@ def test_edge_tts_failure_reports_backend_context(tmp_path, monkeypatch) -> None
 def test_macos_tts_backend_uses_say_command(tmp_path, monkeypatch) -> None:
     run_calls: list[list[str]] = []
 
-    monkeypatch.setattr("demo_video_recorder.tts.shutil.which", lambda _: "/usr/bin/say")
+    monkeypatch.setattr(
+        "demo_video_recorder.tts.shutil.which", lambda _: "/usr/bin/say"
+    )
 
     def fake_run(command, **kwargs):
         run_calls.append(command)
@@ -386,7 +412,8 @@ def test_windows_tts_backend_uses_powershell_sapi(tmp_path, monkeypatch) -> None
     recorded: dict[str, object] = {}
 
     monkeypatch.setattr(
-        "demo_video_recorder.tts.shutil.which", lambda _: r"C:\Windows\System32\powershell.exe"
+        "demo_video_recorder.tts.shutil.which",
+        lambda _: r"C:\Windows\System32\powershell.exe",
     )
 
     def fake_run(command, **kwargs):

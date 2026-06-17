@@ -33,6 +33,165 @@ BrowserName = Literal["chromium", "firefox", "webkit"]
 WebVideoBackend = Literal["playwright", "ffmpeg"]
 INPUT_SELECTOR = "input, textarea"
 SELECT_SELECTOR = "select"
+_SCROLL_INTO_VIEW_HELPER = r"""
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+const ease = progress => 1 - Math.pow(1 - progress, 3);
+const scrollingElement = () => document.scrollingElement || document.documentElement;
+const isDocumentScroller = element => (
+    element === scrollingElement()
+    || element === document.documentElement
+    || element === document.body
+);
+const scrollState = element => {
+    if (isDocumentScroller(element)) {
+        const root = scrollingElement();
+        return {
+            x: window.scrollX,
+            y: window.scrollY,
+            maxX: Math.max(0, root.scrollWidth - window.innerWidth),
+            maxY: Math.max(0, root.scrollHeight - window.innerHeight),
+        };
+    }
+    return {
+        x: element.scrollLeft,
+        y: element.scrollTop,
+        maxX: Math.max(0, element.scrollWidth - element.clientWidth),
+        maxY: Math.max(0, element.scrollHeight - element.clientHeight),
+    };
+};
+const scrollRect = element => {
+    if (isDocumentScroller(element)) {
+        return {
+            left: 0,
+            top: 0,
+            width: window.innerWidth,
+            height: window.innerHeight,
+        };
+    }
+    const rect = element.getBoundingClientRect();
+    return {
+        left: rect.left,
+        top: rect.top,
+        width: rect.width,
+        height: rect.height,
+    };
+};
+const canScroll = element => {
+    if (isDocumentScroller(element)) {
+        const root = scrollingElement();
+        return (
+            root.scrollHeight > window.innerHeight + 1
+            || root.scrollWidth > window.innerWidth + 1
+        );
+    }
+    const style = window.getComputedStyle(element);
+    const overflowY = style.overflowY;
+    const overflowX = style.overflowX;
+    return (
+        (/(auto|scroll|overlay)/.test(overflowY) && element.scrollHeight > element.clientHeight + 1)
+        || (/(auto|scroll|overlay)/.test(overflowX) && element.scrollWidth > element.clientWidth + 1)
+    );
+};
+const scrollableAncestors = element => {
+    const ancestors = [];
+    for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+        if (canScroll(parent)) {
+            ancestors.push(parent);
+        }
+    }
+    const root = scrollingElement();
+    if (root && !ancestors.includes(root)) {
+        ancestors.push(root);
+    }
+    return ancestors;
+};
+const alignedScrollPosition = (current, targetStart, targetSize, viewportSize, alignment) => {
+    if (alignment === 'start') {
+        return current + targetStart;
+    }
+    if (alignment === 'end') {
+        return current + targetStart + targetSize - viewportSize;
+    }
+    if (alignment === 'nearest') {
+        const targetEnd = targetStart + targetSize;
+        if (targetStart >= 0 && targetEnd <= viewportSize) {
+            return current;
+        }
+        const startDelta = targetStart;
+        const endDelta = targetEnd - viewportSize;
+        return current + (Math.abs(startDelta) < Math.abs(endDelta) ? startDelta : endDelta);
+    }
+    return current + targetStart - ((viewportSize - targetSize) / 2);
+};
+const setScroll = (element, x, y) => {
+    if (isDocumentScroller(element)) {
+        window.scrollTo(x, y);
+    } else {
+        element.scrollLeft = x;
+        element.scrollTop = y;
+    }
+};
+const animateScroll = async (element, endX, endY, duration) => {
+    const state = scrollState(element);
+    const startX = state.x;
+    const startY = state.y;
+    if (duration <= 0 || (Math.abs(endX - startX) < 1 && Math.abs(endY - startY) < 1)) {
+        setScroll(element, endX, endY);
+        return;
+    }
+    const startedAt = performance.now();
+    await new Promise(resolve => {
+        const step = now => {
+            const progress = Math.min((now - startedAt) / duration, 1);
+            const eased = ease(progress);
+            setScroll(
+                element,
+                startX + ((endX - startX) * eased),
+                startY + ((endY - startY) * eased),
+            );
+            if (progress < 1) {
+                requestAnimationFrame(step);
+            } else {
+                resolve();
+            }
+        };
+        requestAnimationFrame(step);
+    });
+};
+const scrollIntoViewInContainers = async target => {
+    const containers = scrollableAncestors(target);
+    const requestedDuration = Math.max(
+        0,
+        Number(args.scrollDuration ?? args.duration) || 0,
+    );
+    const stepDuration = containers.length > 0
+        ? requestedDuration / containers.length
+        : requestedDuration;
+    for (const container of containers) {
+        const targetRect = target.getBoundingClientRect();
+        const containerRect = scrollRect(container);
+        const state = scrollState(container);
+        const targetX = alignedScrollPosition(
+            state.x,
+            targetRect.left - containerRect.left,
+            targetRect.width,
+            containerRect.width,
+            args.inline || 'center',
+        );
+        const targetY = alignedScrollPosition(
+            state.y,
+            targetRect.top - containerRect.top,
+            targetRect.height,
+            containerRect.height,
+            args.block || 'center',
+        );
+        const endX = Math.min(Math.max(targetX, 0), state.maxX);
+        const endY = Math.min(Math.max(targetY, 0), state.maxY);
+        await animateScroll(container, endX, endY, stepDuration);
+    }
+    await wait(20);
+};
+"""
 
 
 class WebElement:
@@ -57,67 +216,13 @@ class WebElement:
         self.locator.evaluate(
             """
             async (element, args) => {
+            """
+            + _SCROLL_INTO_VIEW_HELPER
+            + """
                 const target = args.scope === 'field'
                     ? element.closest('label, .field, fieldset, [role="group"]') || element
                     : element;
-                const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
-                const ease = progress => 1 - Math.pow(1 - progress, 3);
-                const scrollWindowToTarget = async () => {
-                    const rect = target.getBoundingClientRect();
-                    const startX = window.scrollX;
-                    const startY = window.scrollY;
-                    const maxX = Math.max(
-                        0,
-                        document.documentElement.scrollWidth - window.innerWidth,
-                    );
-                    const maxY = Math.max(
-                        0,
-                        document.documentElement.scrollHeight - window.innerHeight,
-                    );
-                    const endX = Math.min(
-                        Math.max(startX + rect.left - ((window.innerWidth - rect.width) / 2), 0),
-                        maxX,
-                    );
-                    const endY = Math.min(
-                        Math.max(startY + rect.top - ((window.innerHeight - rect.height) / 2), 0),
-                        maxY,
-                    );
-                    const duration = Math.max(0, Number(args.scrollDuration) || 0);
-
-                    if (duration <= 0 || (Math.abs(endX - startX) < 1 && Math.abs(endY - startY) < 1)) {
-                        window.scrollTo(endX, endY);
-                        return;
-                    }
-
-                    const startedAt = performance.now();
-                    await new Promise(resolve => {
-                        const step = now => {
-                            const progress = Math.min((now - startedAt) / duration, 1);
-                            const eased = ease(progress);
-                            window.scrollTo(
-                                startX + ((endX - startX) * eased),
-                                startY + ((endY - startY) * eased),
-                            );
-                            if (progress < 1) {
-                                requestAnimationFrame(step);
-                            } else {
-                                resolve();
-                            }
-                        };
-                        requestAnimationFrame(step);
-                    });
-                };
-
-                try {
-                    await scrollWindowToTarget();
-                } catch {
-                    target.scrollIntoView({
-                        behavior: 'smooth',
-                        block: 'center',
-                        inline: 'center',
-                    });
-                    await wait(Math.max(300, Number(args.scrollDuration) || 0));
-                }
+                await scrollIntoViewInContainers(target);
 
                 const previousOutline = target.style.outline;
                 const previousOffset = target.style.outlineOffset;
@@ -159,79 +264,11 @@ class WebElement:
         self.locator.evaluate(
             """
             async (element, args) => {
-                const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+            """
+            + _SCROLL_INTO_VIEW_HELPER
+            + """
                 const target = element;
-                const rect = target.getBoundingClientRect();
-                const startX = window.scrollX;
-                const startY = window.scrollY;
-                const maxX = Math.max(
-                    0,
-                    document.documentElement.scrollWidth - window.innerWidth,
-                );
-                const maxY = Math.max(
-                    0,
-                    document.documentElement.scrollHeight - window.innerHeight,
-                );
-
-                const targetX = () => {
-                    if (args.inline === 'start') {
-                        return startX + rect.left;
-                    }
-                    if (args.inline === 'end') {
-                        return startX + rect.right - window.innerWidth;
-                    }
-                    if (args.inline === 'nearest') {
-                        if (rect.left >= 0 && rect.right <= window.innerWidth) {
-                            return startX;
-                        }
-                        return startX + rect.left;
-                    }
-                    return startX + rect.left - ((window.innerWidth - rect.width) / 2);
-                };
-
-                const targetY = () => {
-                    if (args.block === 'start') {
-                        return startY + rect.top;
-                    }
-                    if (args.block === 'end') {
-                        return startY + rect.bottom - window.innerHeight;
-                    }
-                    if (args.block === 'nearest') {
-                        if (rect.top >= 0 && rect.bottom <= window.innerHeight) {
-                            return startY;
-                        }
-                        return startY + rect.top;
-                    }
-                    return startY + rect.top - ((window.innerHeight - rect.height) / 2);
-                };
-
-                const endX = Math.min(Math.max(targetX(), 0), maxX);
-                const endY = Math.min(Math.max(targetY(), 0), maxY);
-                const duration = Math.max(0, Number(args.duration) || 0);
-                if (duration <= 0 || (Math.abs(endX - startX) < 1 && Math.abs(endY - startY) < 1)) {
-                    window.scrollTo(endX, endY);
-                    return;
-                }
-
-                const startedAt = performance.now();
-                const ease = progress => 1 - Math.pow(1 - progress, 3);
-                await new Promise(resolve => {
-                    const step = now => {
-                        const progress = Math.min((now - startedAt) / duration, 1);
-                        const eased = ease(progress);
-                        window.scrollTo(
-                            startX + ((endX - startX) * eased),
-                            startY + ((endY - startY) * eased),
-                        );
-                        if (progress < 1) {
-                            requestAnimationFrame(step);
-                        } else {
-                            resolve();
-                        }
-                    };
-                    requestAnimationFrame(step);
-                });
-                await wait(20);
+                await scrollIntoViewInContainers(target);
             }
             """,
             {
@@ -1551,6 +1588,7 @@ class WebUIRecorder(DemoVideoRecorder):
                 ),  # type: ignore[arg-type]
                 ffmpeg=kwargs.get("ffmpeg", "ffmpeg"),  # type: ignore[arg-type]
                 ffprobe=kwargs.get("ffprobe", "ffprobe"),  # type: ignore[arg-type]
+                subtitle_style=self.subtitle_style,
             )
 
         self.playwright: Playwright | None = None

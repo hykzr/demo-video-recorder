@@ -14,7 +14,11 @@ import time
 
 from demo_video_recorder.defaults import DEFAULTS
 from demo_video_recorder.errors import DependencyMissingError, RecordingError
-from demo_video_recorder.subtitles import parse_srt_time
+from demo_video_recorder.subtitles import (
+    SubtitleStyleLike,
+    parse_srt_time,
+    subtitle_style_to_force_style,
+)
 from demo_video_recorder.tts import NarrationClip
 from demo_video_recorder.types import CaptureRegion
 
@@ -35,6 +39,7 @@ class FfmpegCaptureBackend:
         draw_mouse: bool = False,
         crf: int = 24,
         preset: str = "veryfast",
+        subtitle_style: SubtitleStyleLike = None,
     ) -> None:
         self.raw_video_path = Path(raw_video_path)
         self.framerate = framerate
@@ -44,6 +49,7 @@ class FfmpegCaptureBackend:
         self.draw_mouse = draw_mouse
         self.crf = crf
         self.preset = preset
+        self.subtitle_style = subtitle_style_to_force_style(subtitle_style)
         self.process: subprocess.Popen[str] | None = None
 
     @property
@@ -232,11 +238,17 @@ class FfmpegCaptureBackend:
         output_path: str | Path,
         *,
         audio_path: str | Path | None = None,
+        subtitle_style: SubtitleStyleLike = None,
     ) -> Path:
         self.ensure_available()
         subtitle_path = Path(subtitle_path)
         output_path = Path(output_path)
         audio_path = Path(audio_path) if audio_path is not None else None
+        resolved_subtitle_style = (
+            subtitle_style_to_force_style(subtitle_style)
+            if subtitle_style is not None
+            else self.subtitle_style
+        )
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         if (
@@ -261,6 +273,7 @@ class FfmpegCaptureBackend:
                 output_path=output_path,
                 ffmpeg_binary=subtitle_ffmpeg,
                 audio_path=audio_path,
+                subtitle_style=resolved_subtitle_style,
             )
         finally:
             temp_subtitle.unlink(missing_ok=True)
@@ -562,6 +575,7 @@ class FfmpegCaptureBackend:
         output_path: Path,
         ffmpeg_binary: str,
         audio_path: Path | None = None,
+        subtitle_style: str | None = None,
     ) -> None:
         command = [
             ffmpeg_binary,
@@ -578,7 +592,10 @@ class FfmpegCaptureBackend:
         command.extend(
             [
                 "-vf",
-                self._subtitles_filter_value(subtitle_path),
+                self._subtitles_filter_value(
+                    subtitle_path,
+                    subtitle_style=subtitle_style,
+                ),
                 "-c:v",
                 "libx264",
                 "-preset",
@@ -755,12 +772,28 @@ class FfmpegCaptureBackend:
         pattern = re.compile(rf"\b{re.escape(filter_name)}\b")
         return bool(pattern.search(result.stdout))
 
-    def _subtitles_filter_value(self, subtitle_path: Path) -> str:
+    def _subtitles_filter_value(
+        self,
+        subtitle_path: Path,
+        *,
+        subtitle_style: SubtitleStyleLike = None,
+    ) -> str:
         escaped = str(subtitle_path.resolve())
         escaped = escaped.replace("\\", "\\\\")
         escaped = escaped.replace(":", "\\:")
         escaped = escaped.replace("'", "\\'")
-        return f"subtitles=filename='{escaped}'"
+        filter_value = f"subtitles=filename='{escaped}'"
+        resolved_style = (
+            subtitle_style_to_force_style(subtitle_style)
+            if subtitle_style is not None
+            else self.subtitle_style
+        )
+        if resolved_style:
+            escaped_style = resolved_style.replace("\\", "\\\\")
+            escaped_style = escaped_style.replace(":", "\\:")
+            escaped_style = escaped_style.replace("'", "\\'")
+            filter_value += f":force_style='{escaped_style}'"
+        return filter_value
 
     def _probe_video_dimensions(self) -> tuple[int, int]:
         command = [
@@ -936,6 +969,7 @@ class PlaywrightVideoCaptureBackend(FfmpegCaptureBackend):
         ffprobe: str = "ffprobe",
         crf: int = 24,
         preset: str = "veryfast",
+        subtitle_style: SubtitleStyleLike = None,
     ) -> None:
         super().__init__(
             raw_video_path,
@@ -945,6 +979,7 @@ class PlaywrightVideoCaptureBackend(FfmpegCaptureBackend):
             ffprobe=ffprobe,
             crf=crf,
             preset=preset,
+            subtitle_style=subtitle_style,
         )
         self.video_dir = (
             Path(video_dir)
