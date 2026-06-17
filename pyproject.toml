@@ -1,6 +1,6 @@
 [project]
 name = "demo-video-recorder"
-version = "0.1.4"
+version = "0.1.5"
 description = "Scriptable demo video recording for apps, terminals, and AI agents."
 readme = "README.md"
 requires-python = ">=3.10"
