@@ -154,9 +154,7 @@ class WebElement:
         """Smooth-scroll this element into view without highlighting it."""
 
         resolved_duration_ms = (
-            self.recorder.scroll_duration_ms
-            if duration_ms is None
-            else duration_ms
+            self.recorder.scroll_duration_ms if duration_ms is None else duration_ms
         )
         self.locator.evaluate(
             """
@@ -603,18 +601,13 @@ class WebInputElement(WebElement):
         type_delay_ms: float | None,
         timeout_seconds: float,
     ) -> "WebInputElement":
-        current_length = int(
-            self.locator.evaluate(
-                """
+        current_length = int(self.locator.evaluate("""
                 element => {
                     const value = String(element.value ?? '');
                     element.focus();
                     return value.length;
                 }
-                """
-            )
-            or 0
-        )
+                """) or 0)
         restore_type = self._move_caret(
             current_length,
             current_length=current_length,
@@ -862,7 +855,6 @@ class WebInputElement(WebElement):
         highlight: bool = True,
     ) -> "WebInputElement":
         self.select_all(timeout_seconds=timeout_seconds, highlight=highlight)
-        self.copy(timeout_seconds=timeout_seconds)
         self._wait_between_steps(wait_seconds)
         self.clear_selection(key=key, timeout_seconds=timeout_seconds)
         self._wait_between_steps(wait_seconds)
