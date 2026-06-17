@@ -346,6 +346,19 @@ class FfmpegCaptureBackend:
             raise RecordingError(f"ffmpeg narration mix failed.\n{detail}")
         return output_path
 
+    def mux_audio(
+        self,
+        audio_path: str | Path,
+        output_path: str | Path,
+    ) -> Path:
+        """Mux an external audio track into the raw video without burning subtitles."""
+
+        self.ensure_available()
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        self._mux_audio(audio_path=Path(audio_path), output_path=output_path)
+        return output_path
+
     def _resolve_subtitle_burn_ffmpeg(self) -> str:
         if self._ffmpeg_has_filter("subtitles", ffmpeg_binary=self.ffmpeg):
             return self.ffmpeg

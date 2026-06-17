@@ -432,16 +432,10 @@ class DemoVideoRecorder:
             final_path = self.burn_subtitles(audio_path=narration_audio_path)
         else:
             if narration_audio_path is not None:
-                self.output_path.parent.mkdir(parents=True, exist_ok=True)
-                burn_kwargs: dict[str, object] = {"audio_path": narration_audio_path}
-                if self.subtitle_style is not None:
-                    burn_kwargs["subtitle_style"] = self.subtitle_style
-                self.capture.burn_subtitles(
-                    self.subtitle_path,
+                final_path = self.capture.mux_audio(
+                    narration_audio_path,
                     self.output_path,
-                    **burn_kwargs,
                 )
-                final_path = self.output_path
             else:
                 final_path = self.raw_video_path
 

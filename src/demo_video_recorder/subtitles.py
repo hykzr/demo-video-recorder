@@ -228,7 +228,10 @@ def _format_ass_color(value: str) -> str:
     red = hex_value[0:2]
     green = hex_value[2:4]
     blue = hex_value[4:6]
-    alpha = hex_value[6:8] if len(hex_value) == 8 else "00"
+    alpha = "00"
+    if len(hex_value) == 8:
+        # CSS #RRGGBBAA alpha is opacity; ASS alpha is transparency.
+        alpha = f"{255 - int(hex_value[6:8], 16):02x}"
     return f"&H{alpha}{blue}{green}{red}".upper()
 
 

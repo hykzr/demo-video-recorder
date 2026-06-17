@@ -541,6 +541,67 @@ def test_stop_recording_renders_and_cleans_up_tts_audio(tmp_path) -> None:
     assert recorder.narration_audio_path.exists() is False
 
 
+def test_stop_recording_burn_false_muxes_audio_without_burning_subtitles(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    class FakeTTS(TTSBackend):
+        def __init__(self) -> None:
+            super().__init__(save_dir=tmp_path / "tts")
+            self.cleaned = False
+
+        def save_audio(self, text: str) -> Path:
+            raise AssertionError(f"unexpected save_audio call: {text}")
+
+        def cleanup(self) -> None:
+            self.cleaned = True
+
+    tts = FakeTTS()
+    recorder = DemoVideoRecorder(tmp_path / "demo.mp4", tts=tts)
+    recorder.subtitle_path.write_text(
+        "1\n00:00:00,000 --> 00:00:01,000\nhello\n",
+        encoding="utf-8",
+    )
+    recorder.raw_video_path.write_bytes(b"raw")
+    recorder._narration_clips = [
+        NarrationClip(
+            text="hello",
+            path=tmp_path / "tts" / "clip-0001.mp3",
+            start_seconds=0.0,
+            duration_seconds=1.0,
+        )
+    ]
+    called: dict[str, object] = {}
+
+    def fake_render_narration_audio(clips, output_path):
+        del clips
+        Path(output_path).write_bytes(b"mix")
+        return Path(output_path)
+
+    monkeypatch.setattr(recorder.subtitles, "elapsed_seconds", lambda: 1.0)
+    recorder.capture.probe_duration_seconds = lambda media_path=None: 1.0  # type: ignore[method-assign]
+    recorder.capture.render_narration_audio = fake_render_narration_audio  # type: ignore[method-assign]
+    recorder.capture.mux_audio = lambda audio_path, output_path: called.update(  # type: ignore[method-assign]
+        {"audio_path": Path(audio_path), "output_path": Path(output_path)}
+    ) or Path(
+        output_path
+    )
+    recorder.capture.burn_subtitles = lambda *args, **kwargs: (_ for _ in ()).throw(  # type: ignore[method-assign]
+        AssertionError("unexpected subtitle burn")
+    )
+
+    final_path = recorder.stop_recording(burn=False)
+
+    assert final_path == tmp_path / "demo.mp4"
+    assert called == {
+        "audio_path": recorder.narration_audio_path,
+        "output_path": tmp_path / "demo.mp4",
+    }
+    assert recorder.raw_video_path.exists() is False
+    assert recorder.narration_audio_path.exists() is False
+    assert tts.cleaned is True
+
+
 def test_stop_recording_trims_macos_capture_lead_in_to_match_timeline(
     tmp_path, monkeypatch
 ) -> None:

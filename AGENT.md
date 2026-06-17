@@ -50,6 +50,7 @@ Do this before writing or running a recording script:
 8. Use `explain()` before or after each visible action so the final video has useful burned subtitles, and spoken narration too when TTS is configured.
 9. For interactive CLI apps, read the app output and react to it. Do not hardcode brittle input if the app is stateful or nondeterministic.
 10. For Web UI apps, highlight important non-interactive results too, not only controls. After a click, scroll/highlight the confirmation, computed output, chart, table row, toast, or result panel so the viewer can see what changed.
+    - For multi-section results, you may need to highlight/scroll to each of them one by one to properly display all of them
 11. Run the script yourself in stages.
     - First run a fast smoke test with TTS disabled and with animations/motion disabled or minimized.
     - Add script options such as `--smoke`, `--no-tts`, and `--no-animation` when that helps repeated testing.

@@ -51,6 +51,14 @@ def test_subtitle_style_accepts_mapping_and_css_colors() -> None:
         )
         == "Fontsize=18,PrimaryColour=&H00486314,Bold=-1,Alignment=9"
     )
+    assert (
+        subtitle_style_to_force_style({"primary_color": "#ffffff80"})
+        == "PrimaryColour=&H7FFFFFFF"
+    )
+    assert (
+        subtitle_style_to_force_style({"primary_color": "#ffffff00"})
+        == "PrimaryColour=&HFFFFFFFF"
+    )
 
 
 def test_trim_to_duration_clips_and_reindexes(tmp_path) -> None:

@@ -189,6 +189,37 @@ def test_burn_subtitles_without_srt_muxes_audio_when_present(
     assert called["output_path"] == output_path
 
 
+def test_mux_audio_copies_audio_without_burning_subtitles(tmp_path, monkeypatch) -> None:
+    raw_video = tmp_path / "demo.raw.mp4"
+    audio_path = tmp_path / "demo.m4a"
+    output_path = tmp_path / "nested" / "demo.mp4"
+    raw_video.write_bytes(b"raw")
+    audio_path.write_bytes(b"audio")
+    backend = FfmpegCaptureBackend(raw_video)
+    called: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        backend,
+        "ensure_available",
+        lambda: called.update(available=True),
+    )
+    monkeypatch.setattr(
+        backend,
+        "_mux_audio",
+        lambda *, audio_path, output_path: called.update(
+            {"audio_path": audio_path, "output_path": output_path}
+        ),
+    )
+
+    result = backend.mux_audio(audio_path, output_path)
+
+    assert result == output_path
+    assert called["available"] is True
+    assert called["audio_path"] == audio_path
+    assert called["output_path"] == output_path
+    assert output_path.parent.exists()
+
+
 def test_render_narration_audio_builds_delayed_mix_command(
     tmp_path, monkeypatch
 ) -> None:
